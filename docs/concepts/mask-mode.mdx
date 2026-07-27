@@ -1,0 +1,93 @@
+---
+title: Mask Mode
+description: Replace PII with placeholders before sending to upstream AI services
+---
+
+Mask mode replaces PII with placeholders before sending to the upstream AI service. The response is automatically unmasked before returning to you.
+
+## How It Works
+
+<Steps>
+  <Step title="Request arrives">
+    Your app sends: `"Write a follow-up email to Dr. Sarah Chen (sarah.chen@hospital.org)"`
+  </Step>
+  <Step title="PII detected">
+    PasteGuard finds: `Dr. Sarah Chen` (PERSON), `sarah.chen@hospital.org` (EMAIL)
+  </Step>
+  <Step title="Masked request sent">
+    The provider receives: `"Write a follow-up email to [[PERSON_1]] ([[EMAIL_ADDRESS_1]])"`
+  </Step>
+  <Step title="Response masked">
+    The provider responds: `"Dear [[PERSON_1]], Following up on our discussion..."`
+  </Step>
+  <Step title="Response unmasked">
+    You receive: `"Dear Dr. Sarah Chen, Following up on our discussion..."`
+  </Step>
+</Steps>
+
+## When to Use
+
+- Simple setup without local infrastructure
+- Want to use cloud AI services while protecting PII
+
+## Configuration
+
+```yaml
+mode: mask
+
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+```
+
+### Masking Options
+
+```yaml
+masking:
+  show_markers: false
+  marker_text: "[protected]"
+  allowlist:
+    - pattern: "Company Name Inc."
+    - pattern: 'TEST-\d+'
+      regex: true
+  denylist:
+    - pattern: "ProjectX"
+      type: PROJECT_NAME
+    - pattern: 'CUST-\d{6}'
+      type: CUSTOMER_ID
+      regex: true
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `show_markers` | `false` | Add visual markers around unmasked values |
+| `marker_text` | `[protected]` | Marker text if enabled |
+| `allowlist` | `[]` | Text patterns that are never masked; set `regex: true` for regex patterns |
+| `denylist` | `[]` | Text patterns masked with the configured `type`; set `regex: true` for regex patterns |
+
+## Response Headers
+
+Mask mode sets these headers on responses:
+
+```
+X-PasteGuard-Mode: mask
+X-PasteGuard-Provider: openai
+X-PasteGuard-PII-Detected: true
+X-PasteGuard-PII-Masked: true
+```
+
+## Streaming Support
+
+Mask mode supports streaming responses. PasteGuard buffers tokens and unmasks placeholders in real-time as they arrive.
+
+```python
+stream = client.chat.completions.create(
+    model="gpt-5.2",
+    messages=[{"role": "user", "content": "Email Dr. Sarah Chen at sarah.chen@hospital.org"}],
+    stream=True
+)
+
+for chunk in stream:
+    # PII is already unmasked in each chunk
+    print(chunk.choices[0].delta.content, end="")
+```

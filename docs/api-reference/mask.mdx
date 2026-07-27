@@ -1,0 +1,206 @@
+---
+title: Mask API
+description: POST /api/mask
+---
+
+Standalone endpoint for masking PII and secrets in text. Use this endpoint when you need to mask text independently of LLM provider proxies.
+
+```
+POST /api/mask
+```
+
+## Use Cases
+
+- Browser extensions that need to mask clipboard content before pasting
+- CLI tools that pre-process prompts
+- Custom integrations that handle their own LLM communication
+- Multi-turn conversations where you need to maintain placeholder numbering
+
+## Request
+
+```bash
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Contact john@example.com or call +1 415-555-1234"
+  }'
+```
+
+Browser extensions can identify themselves in dashboard logs by sending:
+
+```http
+X-PasteGuard-Source: browser-extension
+```
+
+## Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | Yes | Text to scan and mask |
+| `startFrom` | object | No | Counter values to continue numbering from previous calls |
+| `detect` | array | No | What to detect: `["pii"]`, `["secrets"]`, or `["pii", "secrets"]` (default: both) |
+
+## Response
+
+```json
+{
+  "masked": "Contact [[EMAIL_ADDRESS_1]] or call [[PHONE_NUMBER_1]]",
+  "context": {
+    "[[EMAIL_ADDRESS_1]]": "john@example.com",
+    "[[PHONE_NUMBER_1]]": "+1 415-555-1234"
+  },
+  "counters": {
+    "EMAIL_ADDRESS": 1,
+    "PHONE_NUMBER": 1
+  },
+  "entities": [
+    { "type": "EMAIL_ADDRESS", "placeholder": "[[EMAIL_ADDRESS_1]]" },
+    { "type": "PHONE_NUMBER", "placeholder": "[[PHONE_NUMBER_1]]" }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `masked` | Text with PII/secrets replaced by placeholders |
+| `context` | Mapping of placeholder to original value (for client-side unmasking) |
+| `counters` | Final counter values per entity type |
+| `entities` | List of detected entities with their placeholders |
+
+## Detection Options
+
+Control what gets detected using the `detect` parameter:
+
+<CodeGroup>
+
+```bash PII Only
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Email john@example.com",
+    "detect": ["pii"]
+  }'
+```
+
+```bash Secrets Only
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----",
+    "detect": ["secrets"]
+  }'
+```
+
+```bash Both (Default)
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Contact john@example.com with key -----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"
+  }'
+```
+
+</CodeGroup>
+
+## Multi-Turn Support
+
+For conversations spanning multiple requests, use the `counters` from the response as `startFrom` in the next request to maintain consistent numbering:
+
+**First request:**
+
+```bash
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Contact john@example.com"
+  }'
+```
+
+Response:
+
+```json
+{
+  "masked": "Contact [[EMAIL_ADDRESS_1]]",
+  "counters": { "EMAIL_ADDRESS": 1 },
+  ...
+}
+```
+
+**Second request (continue numbering):**
+
+```bash
+curl -X POST http://localhost:3000/api/mask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Also reach out to jane@example.com",
+    "startFrom": { "EMAIL_ADDRESS": 1 }
+  }'
+```
+
+Response:
+
+```json
+{
+  "masked": "Also reach out to [[EMAIL_ADDRESS_2]]",
+  "counters": { "EMAIL_ADDRESS": 2 },
+  ...
+}
+```
+
+## Client-Side Unmasking
+
+The `context` field provides a mapping for unmasking responses on the client side:
+
+```javascript
+function unmask(text, context) {
+  let result = text;
+  for (const [placeholder, original] of Object.entries(context)) {
+    result = result.replaceAll(placeholder, original);
+  }
+  return result;
+}
+
+// Usage
+const response = await fetch('/api/mask', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: 'Email john@example.com' })
+});
+const { masked, context } = await response.json();
+
+// Later, unmask an LLM response
+const llmResponse = "I'll contact [[EMAIL_ADDRESS_1]] right away.";
+const unmasked = unmask(llmResponse, context);
+// "I'll contact john@example.com right away."
+```
+
+## Error Responses
+
+### Validation Error (400)
+
+```json
+{
+  "error": {
+    "message": "Invalid request",
+    "type": "validation_error",
+    "details": [
+      { "path": "text", "message": "text is required" }
+    ]
+  }
+}
+```
+
+### Detection Error (503)
+
+Returned when the PII detector or secrets detection is unavailable:
+
+```json
+{
+  "error": {
+    "message": "PII detection failed",
+    "type": "detection_error",
+    "details": [
+      { "message": "Failed to connect to the PII detector..." }
+    ]
+  }
+}
+```

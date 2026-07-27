@@ -1,0 +1,164 @@
+---
+title: Providers
+description: Configure OpenAI, Anthropic, local LLM, and Codex CLI endpoints
+---
+
+Configure endpoints for OpenAI-compatible APIs, Anthropic, local LLMs, and Codex CLI traffic.
+
+## OpenAI Provider
+
+Configure the OpenAI-compatible endpoint for `/openai/v1/*` requests.
+
+```yaml
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    # api_key: ${OPENAI_API_KEY}  # Optional fallback
+```
+
+| Option | Description |
+|--------|-------------|
+| `base_url` | API endpoint (any OpenAI-compatible URL) |
+| `api_key` | Optional. Used if client doesn't send Authorization header |
+
+### Compatible APIs
+
+Any OpenAI-compatible API works:
+
+```yaml
+# OpenAI
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+
+# Azure OpenAI
+providers:
+  openai:
+    base_url: https://your-resource.openai.azure.com/openai/v1
+
+# OpenRouter
+providers:
+  openai:
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+
+# LiteLLM Proxy (self-hosted)
+providers:
+  openai:
+    base_url: http://localhost:4000
+
+# Together AI
+providers:
+  openai:
+    base_url: https://api.together.xyz/v1
+
+# Groq
+providers:
+  openai:
+    base_url: https://api.groq.com/openai/v1
+```
+
+## Anthropic Provider
+
+Configure the Anthropic endpoint for `/anthropic/v1/*` requests.
+
+```yaml
+providers:
+  anthropic:
+    base_url: https://api.anthropic.com
+    # api_key: ${ANTHROPIC_API_KEY}  # Optional fallback
+```
+
+| Option | Description |
+|--------|-------------|
+| `base_url` | Anthropic API endpoint |
+| `api_key` | Optional. Used if client doesn't send `x-api-key` header |
+
+## Codex CLI Backend
+
+Configure the Codex ChatGPT-login endpoint for `/codex/*` requests.
+
+```yaml
+providers:
+  codex:
+    base_url: https://chatgpt.com/backend-api/codex
+```
+
+| Option | Description |
+|--------|-------------|
+| `base_url` | Codex backend endpoint for ChatGPT-login Codex CLI traffic |
+
+PasteGuard forwards the Codex CLI `Authorization` header to the Codex backend. Use `/codex` for Codex users signed in with ChatGPT. Use `/openai/v1` only for OpenAI API-key traffic.
+
+## Local LLM
+
+Required for route mode only. Your local LLM for PII requests.
+
+```yaml
+local:
+  type: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+```
+
+| Option | Description |
+|--------|-------------|
+| `type` | `ollama` or `openai` (for compatible servers) |
+| `base_url` | Local LLM endpoint |
+| `model` | Model to use for all PII requests |
+| `api_key` | Only needed for OpenAI-compatible servers |
+
+### Ollama
+
+```yaml
+local:
+  type: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+```
+
+### vLLM
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8000/v1
+  model: meta-llama/Llama-2-7b-chat-hf
+```
+
+### llama.cpp
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8080/v1
+  model: local
+```
+
+### LocalAI
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8080/v1
+  model: your-model
+  api_key: ${LOCAL_API_KEY}  # if required
+```
+
+## API Key Handling
+
+PasteGuard forwards your client's authentication headers to the configured upstream. You can optionally set `api_key` in config as a fallback for OpenAI and Anthropic. Codex CLI traffic uses the CLI's ChatGPT-login authorization header:
+
+```yaml
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}  # Used if client doesn't send auth
+
+  anthropic:
+    base_url: https://api.anthropic.com
+    api_key: ${ANTHROPIC_API_KEY}  # Used if client doesn't send x-api-key
+
+  codex:
+    base_url: https://chatgpt.com/backend-api/codex
+```

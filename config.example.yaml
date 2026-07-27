@@ -1,0 +1,165 @@
+# PromptWall Configuration
+# Copy this file to config.yaml and adjust the values
+
+# Privacy mode: "mask" or "route"
+#
+# mask:  Masks PII before sending to provider, unmasks in response
+# route: Routes PII requests to local LLM, non-PII to configured provider
+mode: mask
+
+# Server settings
+server:
+  port: 3000
+  host: "0.0.0.0"
+  # request_timeout: 600  # Seconds (0 = no timeout, default: 600)
+
+# Providers - API endpoints
+# Can be cloud (Gemini, OpenAI, Anthropic, Azure) or self-hosted (vLLM, LiteLLM proxy, etc.).
+# Codex CLI uses the ChatGPT-login backend below.
+#
+# DEFAULT PROVIDER: Gemini (Google)
+# To use Gemini, set GEMINI_API_KEY in your .env or environment.
+providers:
+  # Google Gemini endpoint (default)
+  # The proxy forwards your client's Authorization header or uses the api_key below
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta
+    # api_key: ${GEMINI_API_KEY}  # Optional fallback if client doesn't send auth header
+    model: gemini-2.5-flash
+
+  # OpenAI-compatible endpoint (optional)
+  # The proxy forwards your client's Authorization header
+  openai:
+    base_url: https://api.openai.com/v1
+    # api_key: ${OPENAI_API_KEY}  # Optional fallback if client doesn't send auth header
+
+  # Anthropic endpoint (optional)
+  # Enable to use /anthropic/v1/messages endpoint
+  anthropic:
+    base_url: https://api.anthropic.com
+    # api_key: ${ANTHROPIC_API_KEY}  # Optional fallback if client doesn't send auth header
+
+  # Codex ChatGPT-login endpoint
+  # /codex/responses receives PII/secrets protection; support endpoints like /codex/models are proxied
+  # The proxy forwards the Codex CLI Authorization header
+  codex:
+    base_url: https://chatgpt.com/backend-api/codex
+
+# Local provider - only used when mode: route
+# Supports: ollama (native), openai (for vLLM, LocalAI, LM Studio, etc.)
+local:
+  type: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+  # api_key: ${LOCAL_API_KEY}  # Only needed for OpenAI-compatible servers
+
+# Masking settings (only for mask mode)
+masking:
+  # Add visual markers to unmasked values in response (for debugging/demos)
+  # Interferes with copy/paste, so disabled by default
+  show_markers: false
+  marker_text: "[protected]"
+
+  # Text patterns that are never masked (protects against false positives)
+  # allowlist:
+  #   - pattern: "Company Name Inc."
+  #   - pattern: 'TEST-\d+'
+  #     regex: true
+
+  # Text or regex patterns that are always masked, even if the detector misses them
+  # denylist:
+  #   - pattern: "ProjectX"
+  #     type: PROJECT_NAME
+  #   - pattern: 'CUST-\d{6}'
+  #     type: CUSTOMER_ID
+  #     regex: true
+
+# PII Detection settings (detector service, /analyze contract)
+pii_detection:
+  # URL of the detector service (see detector/). Defaults to localhost, which is
+  # correct both for the all-in-one image (detector in the same container) and
+  # for local dev (bun run dev against the docker-compose detector service).
+  detector_url: ${DETECTOR_URL:-http://localhost:5002}
+
+  # Timeout for each detector /analyze request in seconds.
+  # Increase this for very large messages; set to 0 to disable.
+  detector_timeout: ${DETECTOR_TIMEOUT:-30}
+
+  # Add regions only if you need national-format numbers; + numbers work globally.
+  phone_regions: []
+  # phone_regions: [US, GB, DE, IT, IN]
+
+  score_threshold: 0.7  # Minimum confidence score (0.0 - 1.0)
+
+  # Entity types to return
+  entities:
+    - PERSON
+    - LOCATION
+    - EMAIL_ADDRESS
+    - PHONE_NUMBER
+    - CREDIT_CARD
+    - IBAN_CODE
+    - IP_ADDRESS
+    - VAT_CODE  # EU VAT number (any member state; requires country prefix)
+
+# Secrets Detection settings (Secrets Shield)
+# Detects private keys, API keys, tokens and other secret credentials in requests
+secrets_detection:
+  # Enable secrets detection (default: true)
+  enabled: true
+
+  # Action to take when secrets are detected:
+  #   mask:         Replace secrets with placeholders, unmask in response (default)
+  #   block:        Block the request with HTTP 400
+  #   route_local:  Route to local provider (only works in route mode)
+  action: mask
+
+  # All supported secret types are enabled by default. Remove entries to narrow detection.
+  entities:
+    - OPENSSH_PRIVATE_KEY
+    - PEM_PRIVATE_KEY
+    - API_KEY_SK
+    - API_KEY_AWS
+    - API_KEY_GITHUB
+    - JWT_TOKEN
+    - BEARER_TOKEN
+    - ENV_PASSWORD
+    - ENV_SECRET
+    - CONNECTION_STRING
+
+  # Maximum characters to scan per request (performance limit)
+  # Note: Secrets placed after this limit won't be detected.
+  # Set to 0 to scan entire request (full coverage, but slower for large payloads)
+  # The 200KB default covers typical use cases
+  max_scan_chars: 200000
+
+  # Log detected secret types (never logs raw secret content)
+  log_detected_types: true
+
+# Logging settings
+logging:
+  # Storage backend for request logs: "sqlite" (default) or "postgres"
+  driver: sqlite
+
+  # SQLite database for request logs (used when driver is "sqlite")
+  database: ./data/pasteguard.db
+
+  # Postgres connection string (required when driver is "postgres")
+  # postgres_url: ${POSTGRES_URL:-postgres://pasteguard:pasteguard@localhost:5432/pasteguard}
+
+  # Log retention in days (0 = keep forever)
+  retention_days: 30
+
+  # Store request text in the dashboard after masking (default: true)
+  # Disable if you don't want request text stored, even after masking.
+  # Only scanned roles (scan_roles) are stored, after PII and secrets are masked.
+  log_masked_content: true
+
+# Dashboard settings
+dashboard:
+  enabled: true
+
+  # Basic auth for dashboard (optional)
+  # auth:
+  #   username: admin
+  #   password: ${DASHBOARD_PASSWORD}

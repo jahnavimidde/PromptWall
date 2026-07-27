@@ -1,0 +1,76 @@
+---
+title: Open WebUI and LibreChat
+sidebarTitle: Open WebUI and LibreChat
+description: Example configuration for self-hosted chat products inside Apps & APIs
+---
+
+Open WebUI and LibreChat are examples inside the Apps & APIs path. Users keep the same chat UI while PasteGuard handles masking, forwarding, restoration, and dashboard logging in the background.
+
+## Open WebUI
+
+Point Open WebUI to PasteGuard instead of OpenAI directly:
+
+```bash
+OPENAI_API_BASE_URL=http://localhost:3000/openai/v1
+OPENAI_API_KEY=your_openai_api_key
+```
+
+<Note>In Docker Compose, use the service name instead of `localhost`, such as `http://pasteguard:3000/openai/v1`.</Note>
+
+### OpenRouter Responses pipe
+
+For an OpenWebUI pipe that calls OpenRouter through the Responses API, configure OpenRouter as PasteGuard's OpenAI provider:
+
+```yaml
+providers:
+  openai:
+    base_url: https://openrouter.ai/api/v1
+```
+
+Then set these pipe valves in Open WebUI:
+
+| Valve | Value |
+|-------|-------|
+| `BASE_URL` | `http://pasteguard:3000/openai/v1` |
+| `DEFAULT_LLM_ENDPOINT` | `responses` |
+
+Requests sent to `POST /openai/v1/responses` are inspected, restored, and shown in the dashboard.
+
+## LibreChat
+
+Add PasteGuard as a custom endpoint in your LibreChat configuration:
+
+```yaml
+version: 1.3.13
+cache: true
+endpoints:
+  custom:
+    - name: "PasteGuard"
+      apiKey: "${OPENAI_API_KEY}"
+      baseURL: "http://localhost:3000/openai/v1"
+      models:
+        default: ["gpt-5.2"]
+        fetch: true
+      titleConvo: true
+      titleModel: "gpt-5.2"
+```
+
+## Mask Mode vs Route Mode
+
+Self-hosted setups can use either privacy mode depending on your requirements:
+
+| Mode | Best for | How it works |
+|------|----------|--------------|
+| **Mask** | Teams using cloud LLMs | Replaces PII and secrets with placeholders, sends to the cloud provider, restores supported placeholders in the response |
+| **Route** | Teams with a local LLM | Requests containing sensitive data stay on your local LLM, others go to the cloud provider |
+
+Route Mode requires a local LLM provider configured in `config.yaml`. See [Route Mode](/concepts/route-mode) for setup details.
+
+Mask Mode works out of the box with any provider. See [Mask Mode](/concepts/mask-mode) for how masking and unmasking works.
+
+## API Endpoints
+
+| API | PasteGuard URL |
+|----------|----------------|
+| OpenAI | `http://localhost:3000/openai/v1` |
+| Anthropic | `http://localhost:3000/anthropic` |

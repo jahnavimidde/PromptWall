@@ -1,0 +1,238 @@
+import { describe, expect, test } from "bun:test";
+import type { MaskingConfig } from "../../config";
+import { createMaskingContext } from "../../pii/mask";
+import { createUnmaskingStream } from "./stream-transformer";
+
+const defaultConfig: MaskingConfig = {
+  show_markers: false,
+  marker_text: "[protected]",
+  allowlist: [],
+  denylist: [],
+};
+const markerConfig: MaskingConfig = {
+  ...defaultConfig,
+  show_markers: true,
+};
+
+function createSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let index = 0;
+
+  return new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(encoder.encode(chunks[index]));
+        index++;
+      } else {
+        controller.close();
+      }
+    },
+  });
+}
+
+async function consumeStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let result = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    result += decoder.decode(value, { stream: true });
+  }
+
+  return result;
+}
+
+describe("createUnmaskingStream", () => {
+  test("unmasks complete placeholder in single chunk", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "test@test.com";
+
+    const sseData = `data: {"choices":[{"delta":{"content":"Hello [[EMAIL_ADDRESS_1]]!"}}]}\n\n`;
+    const source = createSSEStream([sseData]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("Hello test@test.com!");
+  });
+
+  test("buffers a data line split mid-json across chunks", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    const event = `data: {"choices":[{"delta":{"content":"Hello [[EMAIL_ADDRESS_1]]"}}]}\n\n`;
+    const splitAt = event.indexOf("ADDRESS_1");
+    const source = createSSEStream([event.slice(0, splitAt), event.slice(splitAt)]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("Hello a@b.com");
+    expect(result).not.toContain("[[EMAIL_ADDRESS_1]]");
+  });
+
+  test("handles [DONE] message", async () => {
+    const context = createMaskingContext();
+
+    const chunks = [`data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n`, `data: [DONE]\n\n`];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("data: [DONE]");
+  });
+
+  test("passes through non-content events", async () => {
+    const context = createMaskingContext();
+
+    const sseData = `data: {"choices":[{"delta":{}}]}\n\n`;
+    const source = createSSEStream([sseData]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain(`{"choices":[{"delta":{}}]}`);
+  });
+
+  test("buffers partial placeholder across chunks", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    // Split placeholder across chunks
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Hello [[EMAIL_"}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"ADDRESS_1]] world"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    // Should eventually contain the unmasked email
+    expect(result).toContain("a@b.com");
+  });
+
+  test("buffers a placeholder split between the two opening brackets", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Hello ["}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"[EMAIL_ADDRESS_1]] world"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("a@b.com");
+    expect(result).not.toContain("[[EMAIL_ADDRESS_1]]");
+  });
+
+  test("buffers a placeholder split between the two closing brackets", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "a@b.com";
+
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Hello [[EMAIL_ADDRESS_1]"}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"] world"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("a@b.com");
+    expect(result).not.toContain("[[EMAIL_ADDRESS_1]");
+  });
+
+  test("flushes remaining buffer on stream end", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "test@test.com";
+
+    // Partial placeholder that completes only on flush
+    const chunks = [`data: {"choices":[{"delta":{"content":"Contact [[EMAIL_ADDRESS_1]]"}}]}\n\n`];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("test@test.com");
+  });
+
+  test("handles multiple placeholders in stream", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[PERSON_1]]"] = "John";
+    context.mapping["[[EMAIL_ADDRESS_1]]"] = "john@test.com";
+
+    const sseData = `data: {"choices":[{"delta":{"content":"[[PERSON_1]]: [[EMAIL_ADDRESS_1]]"}}]}\n\n`;
+    const source = createSSEStream([sseData]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("John");
+    expect(result).toContain("john@test.com");
+  });
+
+  test("handles empty stream", async () => {
+    const context = createMaskingContext();
+    const source = createSSEStream([]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toBe("");
+  });
+
+  test("passes through malformed data", async () => {
+    const context = createMaskingContext();
+
+    const chunks = [`data: not-json\n\n`];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("not-json");
+  });
+
+  test("preserves structured content arrays and only unmasks text parts", async () => {
+    const context = createMaskingContext();
+    context.mapping["[[PERSON_1]]"] = "John";
+
+    const sseData =
+      'data: {"choices":[{"delta":{"content":[{"type":"reference","reference_ids":["ref"]},{"type":"text","text":"Hello [[PERSON_1]]"}]}}]}\n\n';
+    const source = createSSEStream([sseData]);
+
+    const unmaskedStream = createUnmaskingStream(source, context, defaultConfig);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).not.toContain("[object Object]");
+    expect(result).toContain('"type":"reference"');
+    expect(result).toContain('"reference_ids":["ref"]');
+    expect(result).toContain('"type":"text"');
+    expect(result).toContain('"text":"Hello John"');
+  });
+
+  test("adds markers to streamed secrets when show_markers is true", async () => {
+    const piiContext = createMaskingContext();
+    const secretsContext = createMaskingContext();
+    secretsContext.mapping["[[API_KEY_SK_1]]"] = "sk-secret";
+
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"Key: [[API_KEY"}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":"_SK_1]]"}}]}\n\n`,
+    ];
+    const source = createSSEStream(chunks);
+
+    const unmaskedStream = createUnmaskingStream(source, piiContext, markerConfig, secretsContext);
+    const result = await consumeStream(unmaskedStream);
+
+    expect(result).toContain("[protected]sk-secret");
+    expect(result).not.toContain("[[API_KEY_SK_1]]");
+  });
+});

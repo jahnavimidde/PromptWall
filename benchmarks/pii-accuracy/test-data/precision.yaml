@@ -1,0 +1,288 @@
+cases:
+  - id: precision_obfuscated_email
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [EMAIL_ADDRESS]
+    text: "Reach support at support [at] example [dot] com."
+    expected: []
+
+  - id: precision_malformed_email
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [EMAIL_ADDRESS]
+    text: "The placeholder alice@@example..com is not a valid mailbox."
+    expected: []
+
+  - id: precision_invalid_credit_card
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [CREDIT_CARD]
+    text: "The internal test number 4111 1111 1111 1112 is invalid."
+    expected: []
+
+  - id: precision_short_iban
+    suite: precision
+    category: precision
+    split: test
+    language: de
+    entities: [IBAN_CODE]
+    text: "Die Zeichenfolge DE001234 ist keine IBAN."
+    expected: []
+
+  - id: precision_invalid_iban_checksum
+    suite: precision
+    category: precision
+    split: test
+    language: de
+    entities: [IBAN_CODE]
+    text: "Die Beispielnummer DE89370400440532013001 hat keine gueltige Pruefsumme."
+    expected: []
+
+  - id: precision_invalid_iban_it_checksum
+    suite: precision
+    category: precision
+    split: test
+    language: it
+    entities: [IBAN_CODE]
+    text: "IBAN con cifra di controllo errata: IT60X0542811101000000123457."
+    expected: []
+
+  - id: precision_version_not_phone
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [PHONE_NUMBER]
+    text: "Release 12.4.8 shipped before ticket 5552671 was closed."
+    expected: []
+
+  - id: precision_order_id_not_phone
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [PHONE_NUMBER]
+    text: "Order 5552671 was closed after release 12.4.8."
+    expected: []
+
+  - id: precision_invalid_ip
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [IP_ADDRESS]
+    text: "The release number 999.12.3.456 is not an IP address."
+    expected: []
+
+  - id: precision_common_words_not_person
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [PERSON]
+    text: "The administrator role approved only read access."
+    expected: []
+
+  - id: precision_fr_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: fr
+    entities: [PERSON, LOCATION]
+    text: "Le client souhaite un rendez-vous la semaine prochaine."
+    expected: []
+
+  - id: precision_es_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: es
+    entities: [PERSON, LOCATION]
+    text: "El cliente solicita la factura del mes corriente."
+    expected: []
+
+  - id: precision_it_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: it
+    entities: [PERSON, LOCATION]
+    text: "Il cliente ha richiesto la fattura entro venerdi."
+    expected: []
+
+  - id: precision_nl_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: nl
+    entities: [PERSON, LOCATION]
+    text: "De klant vraagt om een snelle levering deze week."
+    expected: []
+
+  - id: precision_pt_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: pt
+    entities: [PERSON, LOCATION]
+    text: "O cliente pediu a fatura ate sexta-feira."
+    expected: []
+
+  - id: precision_cloud_region_not_location
+    suite: precision
+    category: precision
+    split: test
+    language: en
+    entities: [LOCATION]
+    gate: false
+    note: "GLiNER tags cloud-region codes (eu-west-1, us-east-1) as LOCATION (~0.94); a known model limitation, tracked report-only (over-masking, not a leak)."
+    text: "The workload moved from eu-west-1 to us-east-1 during the test."
+    expected: []
+
+  - id: precision_pl_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: pl
+    entities: [PERSON, LOCATION]
+    text: "Klient prosi o fakturę przed końcem tygodnia."
+    expected: []
+
+  - id: precision_pl_invalid_credit_card
+    suite: precision
+    category: precision
+    split: test
+    language: pl
+    entities: [CREDIT_CARD]
+    text: "Numer testowy 4111 1111 1111 1112 jest nieprawidłowy."
+    expected: []
+
+  - id: precision_pl_invalid_iban_checksum
+    suite: precision
+    category: precision
+    split: test
+    language: pl
+    entities: [IBAN_CODE]
+    text: "Ciąg PL00109010140000071219812874 ma błędną sumę kontrolną."
+    expected: []
+
+  - id: precision_pl_version_not_phone
+    suite: precision
+    category: precision
+    split: test
+    language: pl
+    entities: [PHONE_NUMBER]
+    text: "Wersja 12.4.8 została wydana przed zgłoszeniem 5552671."
+    expected: []
+
+  - id: precision_pl_cloud_region_not_location
+    suite: precision
+    category: precision
+    split: test
+    language: pl
+    entities: [LOCATION]
+    gate: false
+    note: "Cloud-region codes tagged as LOCATION after removing the structural cloud-region filter; tracked over-masking, report-only."
+    text: "Zadanie przeniesiono z eu-west-1 do us-east-1 podczas testu."
+    expected: []
+
+  - id: precision_ro_roles_not_person_location
+    suite: precision
+    category: precision
+    split: test
+    language: ro
+    entities: [PERSON, LOCATION]
+    gate: false
+    note: "GLiNER tags the Romanian role noun 'Clientul' as PERSON (~0.85); the suppressor labels don't demote it here. Report-only."
+    text: "Clientul cere factura până la sfârșitul săptămânii."
+    expected: []
+
+  - id: precision_ro_invalid_credit_card
+    suite: precision
+    category: precision
+    split: test
+    language: ro
+    entities: [CREDIT_CARD]
+    text: "Numărul de test 4111 1111 1111 1112 este invalid."
+    expected: []
+
+  - id: precision_ro_invalid_iban_checksum
+    suite: precision
+    category: precision
+    split: test
+    language: ro
+    entities: [IBAN_CODE]
+    text: "Șirul RO00AAAA1B31007593840000 are o sumă de control greșită."
+    expected: []
+
+  - id: precision_ro_version_not_phone
+    suite: precision
+    category: precision
+    split: test
+    language: ro
+    entities: [PHONE_NUMBER]
+    text: "Versiunea 12.4.8 a fost lansată înainte de tichetul 5552671."
+    expected: []
+
+  - id: precision_ro_cloud_region_not_location
+    suite: precision
+    category: precision
+    split: test
+    language: ro
+    entities: [LOCATION]
+    gate: false
+    note: "Cloud-region codes tagged as LOCATION after removing the structural cloud-region filter; tracked over-masking, report-only."
+    text: "Sarcina a fost mutată din eu-west-1 în us-east-1 în timpul testului."
+    expected: []
+
+  # --- Known over-masking after removing the stoplist (report-only) ---
+  # These document false positives GLiNER produces with high confidence and that
+  # no competing suppressor label separates. Tracked here so the benchmark stops
+  # hiding them; not gating.
+  - id: precision_de_pronoun_not_person
+    suite: precision
+    category: precision
+    split: test
+    language: de
+    entities: [PERSON, LOCATION]
+    gate: false
+    note: "GLiNER tags the German pronoun 'Ich' as PERSON (~0.97), above the floor and not separable by a competing label. Report-only."
+    text: "Ich habe die Rechnung bereits bezahlt."
+    expected: []
+
+  - id: precision_it_common_noun_not_location
+    suite: precision
+    category: precision
+    split: test
+    language: it
+    entities: [PERSON, LOCATION]
+    gate: false
+    note: "GLiNER tags the Italian common noun 'Indirizzo' (address) as a location (~0.8). Report-only."
+    text: "Indirizzo del cliente non presente in fattura."
+    expected: []
+
+  - id: precision_de_mandant_not_person
+    suite: precision
+    category: precision
+    split: test
+    language: de
+    entities: [PERSON, LOCATION]
+    gate: false
+    note: "GLiNER tags the German term 'Mandant' (client) as PERSON (~0.9) even against suppressor labels; it is not suppressed. Report-only."
+    text: "Der Mandant hat die Unterlagen eingereicht."
+    expected: []
+
+  - id: precision_invalid_vat_checksum
+    suite: precision
+    category: precision
+    split: test
+    language: de
+    entities: [VAT_CODE]
+    text: "Die Referenz DE136695977 hat keine gueltige Pruefsumme."
+    expected: []

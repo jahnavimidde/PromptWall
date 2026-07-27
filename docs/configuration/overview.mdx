@@ -1,0 +1,70 @@
+---
+title: Overview
+description: Configuration basics
+---
+
+PasteGuard is configured via `config.yaml`. Copy from the example:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+## Mode
+
+Privacy mode determines how PII is handled.
+
+```yaml
+mode: mask
+```
+
+| Value | Description |
+|-------|-------------|
+| `mask` | Replace PII with placeholders, send to the upstream AI service, restore in response |
+| `route` | PII requests stay on your local LLM (Ollama, vLLM, llama.cpp), others go to the configured cloud provider |
+
+See [Mask Mode](/concepts/mask-mode) and [Route Mode](/concepts/route-mode) for details.
+
+## Server
+
+```yaml
+server:
+  port: 3000
+  host: "0.0.0.0"
+  request_timeout: 600
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `port` | `3000` | HTTP port |
+| `host` | `0.0.0.0` | Bind address |
+| `request_timeout` | `600` | Request timeout in seconds (0 = no timeout) |
+
+## Dashboard
+
+```yaml
+dashboard:
+  enabled: true
+  auth:
+    username: admin
+    password: ${DASHBOARD_PASSWORD}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | `true` | Enable dashboard at `/dashboard` |
+| `auth.username` | - | Basic auth username |
+| `auth.password` | - | Basic auth password |
+
+## Environment Variables
+
+Use `${VAR}` or `${VAR:-default}` syntax:
+
+```yaml
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+
+pii_detection:
+  detector_url: ${DETECTOR_URL:-http://localhost:5002}
+  detector_timeout: ${DETECTOR_TIMEOUT:-30}
+```

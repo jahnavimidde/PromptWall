@@ -1,0 +1,50 @@
+{
+  "name": "pasteguard",
+  "version": "0.8.0",
+  "description": "Enterprise AI Security Gateway. Masks personal data and secrets before sending to your provider.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun --external lightningcss",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "typecheck:benchmarks": "tsc --noEmit --project tsconfig.benchmarks.json",
+    "lint": "biome lint src benchmarks/pii-accuracy/*.ts",
+    "format": "biome format src benchmarks/pii-accuracy/*.ts --write",
+    "check": "biome check src benchmarks/pii-accuracy/*.ts",
+    "benchmark:accuracy": "bun run benchmarks/pii-accuracy/run.ts"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "hono": "^4.12.23",
+    "hono-tailwind": "^2.2.0",
+    "kysely": "^0.29.2",
+    "pg": "^8.22.0",
+    "tailwindcss": "^4.3.0",
+    "yaml": "^2.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/bun": "latest",
+    "@types/pg": "^8.20.0",
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "llm",
+    "privacy",
+    "pii",
+    "openai",
+    "proxy",
+    "gdpr",
+    "routing"
+  ],
+  "author": "Stefan Gasser",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sgasser/pasteguard"
+  }
+}

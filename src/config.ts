@@ -1,0 +1,366 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
+
+// Schema definitions
+
+// Local provider - for route mode when PII is detected
+const LocalProviderSchema = z.object({
+  type: z.enum(["openai", "ollama"]), // ollama native or openai-compatible (vLLM, LocalAI, etc.)
+  api_key: z.string().optional(),
+  base_url: z.string().url(),
+  model: z.string(), // Required: all PII requests use this model
+});
+
+// Providers - OpenAI-compatible endpoints (cloud or self-hosted)
+const OpenAIProviderSchema = z.object({
+  enabled: z.boolean().default(true),
+  base_url: z.string().url().default("https://api.openai.com/v1"),
+  api_key: z.string().optional(), // Optional fallback if client doesn't send auth header
+  model: z.string().default("gpt-4o"),
+});
+
+// Anthropic provider
+const AnthropicProviderSchema = z.object({
+  enabled: z.boolean().default(true),
+  base_url: z.string().url().default("https://api.anthropic.com"),
+  api_key: z.string().optional(), // Optional fallback if client doesn't send auth header
+  model: z.string().default("claude-3-5-sonnet-20241022"),
+});
+
+// Codex ChatGPT-login backend
+const CodexProviderSchema = z.object({
+  enabled: z.boolean().default(true),
+  base_url: z.string().url().default("https://chatgpt.com/backend-api/codex"),
+  api_key: z.string().optional(),
+  model: z.string().default("codex"),
+});
+
+// Gemini provider (default)
+const GeminiProviderSchema = z.object({
+  enabled: z.boolean().default(true),
+  base_url: z.string().url().default("https://generativelanguage.googleapis.com/v1beta"),
+  api_key: z.string().optional(),
+  model: z.string().default("gemini-2.5-flash"),
+});
+
+const DEFAULT_ALLOWLIST = [
+  { pattern: "You are Claude Code, Anthropic's official CLI for Claude.", regex: false },
+];
+
+function validateRegexPattern(
+  pattern: string,
+  regex: boolean,
+  ctx: z.RefinementCtx,
+  message: string,
+): void {
+  if (!regex) return;
+
+  let compiled: RegExp;
+  try {
+    compiled = new RegExp(pattern, "g");
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["pattern"],
+      message,
+    });
+    return;
+  }
+
+  // Reject patterns that match the empty string: zero-length matches are skipped, so they mask nothing.
+  if (compiled.test("")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["pattern"],
+      message: `${message} (must not match the empty string)`,
+    });
+  }
+}
+
+const AllowlistPatternSchema = z.union([
+  z
+    .string()
+    .min(1)
+    .transform((pattern) => ({ pattern, regex: false })),
+  z
+    .object({
+      pattern: z.string().min(1),
+      regex: z.boolean().default(false),
+    })
+    .superRefine((entry, ctx) => {
+      validateRegexPattern(entry.pattern, entry.regex, ctx, "Invalid allowlist regex pattern");
+    }),
+]);
+
+const DenylistPatternSchema = z
+  .object({
+    pattern: z.string().min(1),
+    type: z.string().min(1),
+    regex: z.boolean().default(false),
+  })
+  .superRefine((entry, ctx) => {
+    validateRegexPattern(entry.pattern, entry.regex, ctx, "Invalid denylist regex pattern");
+  });
+
+const MaskingSchema = z.object({
+  show_markers: z.boolean().default(false),
+  marker_text: z.string().default("[protected]"),
+  allowlist: z
+    .array(AllowlistPatternSchema)
+    .default([])
+    .transform((arr) => [...DEFAULT_ALLOWLIST, ...arr]),
+  denylist: z.array(DenylistPatternSchema).default([]),
+});
+
+const PhoneRegionSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.toUpperCase())
+  .pipe(z.string().regex(/^[A-Z]{2}$/, "Expected ISO 3166-1 alpha-2 region code"));
+
+const PhoneRegionsSchema = z
+  .union([z.array(PhoneRegionSchema), z.string()])
+  .transform((val) => {
+    if (Array.isArray(val)) return val;
+    return val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  })
+  .pipe(z.array(PhoneRegionSchema))
+  .default([]);
+
+const KNOWN_SCAN_ROLES = ["user", "tool", "function", "mcp", "system", "developer", "assistant"];
+const DEFAULT_SCAN_ROLES = ["user", "tool", "function", "mcp"];
+const scanRolesField = z
+  .array(
+    z.string().refine((role) => KNOWN_SCAN_ROLES.includes(role), {
+      message: `Unknown scan role (allowed: ${KNOWN_SCAN_ROLES.join(", ")})`,
+    }),
+  )
+  .default([...DEFAULT_SCAN_ROLES])
+  .transform((roles) => (roles.length > 0 ? roles : [...DEFAULT_SCAN_ROLES]));
+
+const PIIDetectionSchema = z.object({
+  enabled: z.boolean().default(true),
+  detector_url: z.string().url(),
+  detector_timeout: z.coerce.number().int().min(0).default(30),
+  phone_regions: PhoneRegionsSchema,
+  score_threshold: z.coerce.number().min(0).max(1).default(0.7),
+  entities: z
+    .array(z.string())
+    .default([
+      "PERSON",
+      "LOCATION",
+      "EMAIL_ADDRESS",
+      "PHONE_NUMBER",
+      "CREDIT_CARD",
+      "IBAN_CODE",
+      "IP_ADDRESS",
+      "VAT_CODE",
+    ]),
+  scan_roles: scanRolesField,
+});
+
+const ServerSchema = z.object({
+  port: z.coerce.number().int().min(1).max(65535).default(3000),
+  host: z.string().default("0.0.0.0"),
+  request_timeout: z.coerce.number().int().min(0).default(600),
+});
+
+const LoggingSchema = z
+  .object({
+    driver: z.enum(["sqlite", "postgres"]).default("sqlite"),
+    database: z.string().default("./data/pasteguard.db"),
+    postgres_url: z.string().optional(),
+    retention_days: z.coerce.number().int().min(0).default(30),
+    log_masked_content: z.boolean().default(true),
+  })
+  .refine((logging) => logging.driver !== "postgres" || Boolean(logging.postgres_url), {
+    path: ["postgres_url"],
+    message: "logging.postgres_url is required when logging.driver is 'postgres'",
+  });
+
+const DashboardAuthSchema = z.object({
+  username: z.string(),
+  password: z.string(),
+});
+
+const DashboardSchema = z.object({
+  enabled: z.boolean().default(true),
+  auth: DashboardAuthSchema.optional(),
+});
+
+// All supported secret entity types
+const SecretEntityTypes = [
+  "OPENSSH_PRIVATE_KEY",
+  "PEM_PRIVATE_KEY",
+  "API_KEY_SK",
+  "API_KEY_AWS",
+  "API_KEY_GITHUB",
+  "JWT_TOKEN",
+  "BEARER_TOKEN",
+  "ENV_PASSWORD",
+  "ENV_SECRET",
+  "CONNECTION_STRING",
+] as const;
+
+const SecretsDetectionSchema = z.object({
+  enabled: z.boolean().default(true),
+  action: z.enum(["block", "mask", "route_local"]).default("mask"),
+  entities: z.array(z.enum(SecretEntityTypes)).default([...SecretEntityTypes]),
+  max_scan_chars: z.coerce.number().int().min(0).default(200000),
+  log_detected_types: z.boolean().default(true),
+  scan_roles: scanRolesField,
+});
+
+const ConfigSchema = z
+  .object({
+    mode: z.enum(["route", "mask"]).default("route"),
+    server: ServerSchema.default({}),
+    // Providers — Gemini is the default provider
+    providers: z.object({
+      gemini: GeminiProviderSchema.default({}),
+      openai: OpenAIProviderSchema.default({}),
+      anthropic: AnthropicProviderSchema.default({}),
+      codex: CodexProviderSchema.default({}),
+    }),
+    // Local provider - only for route mode
+    local: LocalProviderSchema.optional(),
+    masking: MaskingSchema.default({}),
+    pii_detection: PIIDetectionSchema,
+    logging: LoggingSchema.default({}),
+    dashboard: DashboardSchema.default({}),
+    secrets_detection: SecretsDetectionSchema.default({}),
+  })
+  .refine(
+    (config) => {
+      // Route mode requires local provider
+      if (config.mode === "route") {
+        return config.local !== undefined;
+      }
+      return true;
+    },
+    {
+      message: "Route mode requires 'local' provider configuration",
+    },
+  )
+  .refine(
+    (config) => {
+      // route_local action requires route mode
+      if (config.secrets_detection.action === "route_local" && config.mode === "mask") {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        "secrets_detection.action 'route_local' is not compatible with mode 'mask'. Use mode 'route' or change secrets_detection.action to 'block' or 'mask'",
+    },
+  );
+
+export type Config = z.infer<typeof ConfigSchema>;
+export type OpenAIProviderConfig = z.infer<typeof OpenAIProviderSchema>;
+export type AnthropicProviderConfig = z.infer<typeof AnthropicProviderSchema>;
+export type CodexProviderConfig = z.infer<typeof CodexProviderSchema>;
+export type GeminiProviderConfig = z.infer<typeof GeminiProviderSchema>;
+export type LocalProviderConfig = z.infer<typeof LocalProviderSchema>;
+export type MaskingConfig = z.infer<typeof MaskingSchema>;
+export type AllowlistPattern = z.infer<typeof AllowlistPatternSchema>;
+export type DenylistPattern = z.infer<typeof DenylistPatternSchema>;
+export type SecretsDetectionConfig = z.infer<typeof SecretsDetectionSchema>;
+export type ServerConfig = z.infer<typeof ServerSchema>;
+
+/**
+ * Replaces ${VAR} and ${VAR:-default} patterns with environment variable values
+ */
+function substituteEnvVars(value: string): string {
+  return value.replace(/\$\{([^}]+)\}/g, (_, expr) => {
+    // Support ${VAR:-default} syntax
+    const [varName, defaultValue] = expr.split(":-");
+    const envValue = process.env[varName];
+    if (envValue) {
+      return envValue;
+    }
+    if (defaultValue !== undefined) {
+      return defaultValue;
+    }
+    console.warn(`Warning: Environment variable ${varName} is not set`);
+    return "";
+  });
+}
+
+/**
+ * Recursively substitutes environment variables in an object
+ */
+function substituteEnvVarsInObject(obj: unknown): unknown {
+  if (typeof obj === "string") {
+    return substituteEnvVars(obj);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(substituteEnvVarsInObject);
+  }
+  if (obj !== null && typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = substituteEnvVarsInObject(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
+ * Loads configuration from YAML file with environment variable substitution
+ */
+export function loadConfig(configPath?: string): Config {
+  const paths = configPath
+    ? [configPath]
+    : ["./config.yaml", "./config.yml", "./config.example.yaml"];
+
+  let configFile: string | null = null;
+
+  for (const path of paths) {
+    if (existsSync(path)) {
+      if (!statSync(path).isFile()) {
+        throw new Error(
+          `'${path}' is a directory, not a file. Run: cp config.example.yaml config.yaml`,
+        );
+      }
+      configFile = readFileSync(path, "utf-8");
+      break;
+    }
+  }
+
+  if (!configFile) {
+    throw new Error(
+      `No config file found. Tried: ${paths.join(", ")}\nCreate a config.yaml file or copy config.example.yaml`,
+    );
+  }
+
+  const rawConfig = parseYaml(configFile);
+  const configWithEnv = substituteEnvVarsInObject(rawConfig);
+
+  const result = ConfigSchema.safeParse(configWithEnv);
+
+  if (!result.success) {
+    console.error("Config validation errors:");
+    for (const error of result.error.errors) {
+      console.error(`  - ${error.path.join(".")}: ${error.message}`);
+    }
+    throw new Error("Invalid configuration");
+  }
+
+  return result.data;
+}
+
+// Singleton config instance
+let configInstance: Config | null = null;
+
+export function getConfig(): Config {
+  if (!configInstance) {
+    configInstance = loadConfig();
+  }
+  return configInstance;
+}

@@ -1,0 +1,1 @@
+export const HEALTH_CHECK_TIMEOUT_MS = 5_000;

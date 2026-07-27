@@ -1,0 +1,257 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
+import { logger } from "hono/logger";
+import pkg from "../package.json";
+import { getConfig } from "./config";
+import { getLogger } from "./logging/logger";
+import { getPIIDetector } from "./pii/detect";
+import { anthropicRoutes } from "./routes/anthropic";
+import { apiRoutes } from "./routes/api";
+import { codexRoutes } from "./routes/codex";
+import { dashboardRoutes } from "./routes/dashboard";
+import { healthRoutes } from "./routes/health";
+import { infoRoutes } from "./routes/info";
+import { landingRoutes } from "./routes/landing";
+import { openaiRoutes } from "./routes/openai";
+
+type Variables = {
+  requestId: string;
+};
+
+const config = getConfig();
+const app = new Hono<{ Variables: Variables }>();
+
+// Request ID middleware
+const requestIdMiddleware = createMiddleware<{ Variables: Variables }>(async (c, next) => {
+  const requestId = c.req.header("x-request-id") || crypto.randomUUID();
+  c.set("requestId", requestId);
+  c.header("X-Request-ID", requestId);
+  await next();
+});
+
+// Middleware
+app.use("*", requestIdMiddleware);
+app.use("*", cors());
+app.use("*", logger());
+
+// Favicon
+app.get("/favicon.svg", (c) => {
+  const svg = `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M32 6C20 6 12 12 12 12v20c0 12 8 22 20 26 12-4 20-14 20-26V12s-8-6-20-6z" fill="#b45309"/></svg>`;
+  return c.body(svg, 200, {
+    "Content-Type": "image/svg+xml",
+    "Cache-Control": "public, max-age=86400",
+  });
+});
+
+// Landing page at / (before healthRoutes so GET / is not caught by health redirect)
+app.route("/", landingRoutes);
+app.route("/", healthRoutes);
+app.route("/", infoRoutes);
+app.route("/openai", openaiRoutes);
+app.route("/anthropic", anthropicRoutes);
+app.route("/codex", codexRoutes);
+app.route("/api", apiRoutes);
+
+if (config.dashboard.enabled) {
+  app.route("/dashboard", dashboardRoutes);
+}
+
+app.notFound((c) => {
+  return c.json(
+    {
+      error: {
+        message: `Route not found: ${c.req.method} ${c.req.path}`,
+        type: "not_found",
+      },
+    },
+    404,
+  );
+});
+
+app.onError((err, c) => {
+  if (err instanceof HTTPException) {
+    return err.getResponse();
+  }
+
+  console.error("Unhandled error:", err);
+  return c.json(
+    {
+      error: {
+        message: "Internal server error",
+        type: "internal_error",
+      },
+    },
+    500,
+  );
+});
+
+const port = config.server.port;
+const host = config.server.host;
+
+export default {
+  port,
+  hostname: host,
+  fetch: app.fetch,
+};
+
+// Startup validation
+validateStartup().then(async () => {
+  printStartupBanner(config, host, port);
+  const stopCleanup = await startCleanupScheduler(config);
+  setupGracefulShutdown(stopCleanup);
+});
+
+async function validateStartup() {
+  // Validate secrets detection configuration
+  if (config.secrets_detection.action === "route_local" && config.mode === "mask") {
+    console.error("\n❌ Configuration error detected!\n");
+    console.error("   secrets_detection.action 'route_local' is not compatible with mode 'mask'.");
+    console.error("   Use mode 'route' or change secrets_detection.action to 'block' or 'mask'.\n");
+    console.error("[STARTUP] ✗ Invalid configuration. Exiting for safety.");
+    process.exit(1);
+  }
+
+  const detector = getPIIDetector();
+
+  // Wait for the detector to be ready (model load can take a while on first start)
+  const startupTimeout = Number(process.env.PASTEGUARD_STARTUP_TIMEOUT) || 180;
+  console.log("[STARTUP] Connecting to the detector...");
+  const ready = await detector.waitForReady(startupTimeout, 1000);
+
+  if (!ready) {
+    console.error(
+      `[STARTUP] ✗ Could not connect to the detector at ${config.pii_detection.detector_url}`,
+    );
+    console.error("          Make sure the detector is running: docker compose up detector -d");
+    process.exit(1);
+  }
+
+  console.log("[STARTUP] ✓ Detector connected");
+}
+
+function printStartupBanner(config: ReturnType<typeof getConfig>, host: string, port: number) {
+  const providerCount = Object.keys(config.providers).length + (config.local ? 1 : 0);
+  const pipelineStatus = `PII: active (${config.pii_detection.entities.length} entities) | Secrets: ${
+    config.secrets_detection.enabled ? "active" : "disabled"
+  }`;
+
+  const modeInfo =
+    config.mode === "route"
+      ? `
+Routing:
+  No PII:  gemini (default)
+  On PII:  local
+
+Providers:
+  Gemini: ${config.providers.gemini.base_url}
+  OpenAI: ${config.providers.openai.base_url}
+  Codex:  ${config.providers.codex.base_url}
+  Local:  ${config.local?.type || "not configured"} → ${config.local?.model || "n/a"}`
+      : `
+Masking:
+  Markers: ${config.masking.show_markers ? "enabled" : "disabled"}
+
+Providers:
+  Gemini: ${config.providers.gemini.base_url}
+  OpenAI: ${config.providers.openai.base_url}
+  Codex:  ${config.providers.codex.base_url}`;
+
+  console.log(`
+╔═══════════════════════════════════════════════════════════╗
+║                       PromptWall                          ║
+║             Enterprise AI Security Gateway                ║
+╚═══════════════════════════════════════════════════════════╝
+
+Version:    v${pkg.version}
+Providers:  ${providerCount} configured
+Pipeline:   ${pipelineStatus}
+
+Server:     http://${host}:${port}
+Gemini API: http://${host}:${port}/openai/v1/chat/completions  [DEFAULT]
+OpenAI API: http://${host}:${port}/openai/v1/chat/completions
+Anthropic:  http://${host}:${port}/anthropic/v1/messages
+Codex:      http://${host}:${port}/codex
+Mask API:   http://${host}:${port}/api/mask
+Health:     http://${host}:${port}/health
+Info:       http://${host}:${port}/info
+Dashboard:  http://${host}:${port}/dashboard
+
+Mode:       ${config.mode.toUpperCase()}
+${modeInfo}
+
+PII Detection:
+  Phone regions: ${config.pii_detection.phone_regions.length > 0 ? config.pii_detection.phone_regions.join(", ") : "none (+ international only)"}
+  Threshold: ${config.pii_detection.score_threshold}
+  Entities:  ${config.pii_detection.entities.join(", ")}
+
+Secrets Detection:
+  Enabled:   ${config.secrets_detection.enabled ? "yes" : "no"}
+  Action:    ${config.secrets_detection.enabled ? config.secrets_detection.action : "n/a"}
+  Entities:  ${config.secrets_detection.enabled ? config.secrets_detection.entities.join(", ") : "n/a"}
+`);
+}
+
+async function startCleanupScheduler(config: ReturnType<typeof getConfig>): Promise<() => void> {
+  let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+  if (config.logging.retention_days > 0) {
+    const logger = getLogger();
+
+    // Run cleanup on startup
+    try {
+      const deleted = await logger.cleanup();
+      if (deleted > 0) {
+        console.log(
+          `Log cleanup: removed ${deleted} entries older than ${config.logging.retention_days} days`,
+        );
+      }
+    } catch (error) {
+      console.error("Log cleanup failed:", error);
+    }
+
+    // Schedule daily cleanup
+    cleanupInterval = setInterval(
+      () => {
+        void (async () => {
+          try {
+            const count = await logger.cleanup();
+            if (count > 0) {
+              console.log(
+                `Log cleanup: removed ${count} entries older than ${config.logging.retention_days} days`,
+              );
+            }
+          } catch (error) {
+            console.error("Log cleanup failed:", error);
+          }
+        })();
+      },
+      24 * 60 * 60 * 1000,
+    );
+  }
+
+  return () => {
+    if (cleanupInterval) {
+      clearInterval(cleanupInterval);
+    }
+  };
+}
+
+function setupGracefulShutdown(stopCleanup: () => void) {
+  function shutdown() {
+    console.log("\nShutting down...");
+    stopCleanup();
+    void (async () => {
+      try {
+        await getLogger().close();
+      } catch {
+        // Logger might not be initialized
+      }
+      process.exit(0);
+    })();
+  }
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+}

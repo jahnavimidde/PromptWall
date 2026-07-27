@@ -1,0 +1,93 @@
+---
+title: Installation
+description: Docker image and deployment options
+---
+
+PasteGuard ships as a single all-in-one Docker image — the Bun proxy and the PII
+detector (deterministic regex/checksum + multilingual GLiNER) run together in one
+container. No build step required.
+
+## Docker Image
+
+```
+ghcr.io/sgasser/pasteguard
+```
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest release |
+| `vX.Y.Z` | Pinned release version |
+
+Detection is multilingual and language-agnostic — one model finds entities
+regardless of the language the text is written in, so there are no per-language
+image variants.
+
+## Quick Start
+
+```bash
+docker run --rm -p 3000:3000 ghcr.io/sgasser/pasteguard:latest
+```
+
+PasteGuard runs on `http://localhost:3000`. Open
+[http://localhost:3000](http://localhost:3000) for the dashboard.
+
+<Note>
+The first start loads the detection model and can take a little longer; the
+container reports healthy once both the proxy and the detector are ready.
+</Note>
+
+## Production Setup
+
+For persistent logs and custom configuration:
+
+```bash
+# Download config
+curl -O https://raw.githubusercontent.com/sgasser/pasteguard/main/config.example.yaml
+mv config.example.yaml config.yaml
+
+# Create data directory
+mkdir -p data
+
+# Run with persistence
+docker run -d --name pasteguard --restart unless-stopped -p 3000:3000 \
+  -v ./config.yaml:/pasteguard/config.yaml:ro \
+  -v ./data:/pasteguard/data \
+  ghcr.io/sgasser/pasteguard:latest
+```
+
+This gives you:
+- **Custom config** — edit `config.yaml` to change detection settings
+- **Persistent logs** — request history in `data/pasteguard.db` survives restarts
+- **Auto-restart** — the container restarts automatically
+
+Or with Docker Compose:
+
+```bash
+curl -O https://raw.githubusercontent.com/sgasser/pasteguard/main/docker-compose.yml
+docker compose up -d
+```
+
+## Languages and phone numbers
+
+Detection is multilingual and needs no per-language configuration. Configure
+`phone_regions` only if you need national-format phone numbers without a `+`
+country prefix — see [PII Detection Config](/configuration/pii-detection).
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DETECTOR_URL` | `http://localhost:5002` | Where the proxy reaches the detector. In the all-in-one image this is in-container and rarely changed; override it to point at an external detector. |
+| `DETECTOR_TIMEOUT` | `30` | Seconds to wait for each detector `/analyze` request when using the example config. Increase for very large messages; set to `0` to disable. |
+| `PASTEGUARD_STARTUP_TIMEOUT` | `180` | Seconds to wait for the detector to become ready at startup |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first request
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Customize PasteGuard
+  </Card>
+</CardGroup>

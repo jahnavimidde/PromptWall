@@ -1,0 +1,109 @@
+---
+title: Route Mode
+description: Route PII requests to a local LLM
+---
+
+Route mode sends requests containing PII to a local LLM. Requests without PII go to OpenAI or Anthropic.
+
+## How It Works
+
+<CardGroup cols={2}>
+  <Card title="Request with PII" icon="shield-check">
+    Routed to **Local LLM** (Ollama, vLLM, llama.cpp, etc.)
+
+    PII stays on your network.
+  </Card>
+  <Card title="Request without PII" icon="server">
+    Routed to **OpenAI or Anthropic**
+
+    Full performance.
+  </Card>
+</CardGroup>
+
+## When to Use
+
+- Have local GPU resources
+- Need complete data isolation for sensitive requests
+- Must prevent any PII from leaving your network
+
+## Configuration
+
+```yaml
+mode: route
+
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+
+local:
+  type: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+```
+
+In route mode:
+- **No PII detected** → Request goes to OpenAI or Anthropic
+- **PII detected** → Request goes to local LLM
+
+<Note>
+For Anthropic requests, the local LLM must support the Anthropic Messages API (e.g., Ollama with Anthropic API compatibility).
+</Note>
+
+## Local LLM Setup
+
+### Ollama
+
+```yaml
+local:
+  type: ollama
+  base_url: http://localhost:11434
+  model: llama3.2
+```
+
+### vLLM
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8000/v1
+  model: meta-llama/Llama-2-7b-chat-hf
+```
+
+### llama.cpp
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8080/v1
+  model: local
+```
+
+### LocalAI
+
+```yaml
+local:
+  type: openai
+  base_url: http://localhost:8080/v1
+  model: your-model-name
+  api_key: ${LOCAL_API_KEY}  # if required
+```
+
+## Response Headers
+
+Route mode sets these headers on responses:
+
+When a request is routed to local:
+
+```
+X-PasteGuard-Mode: route
+X-PasteGuard-Provider: local
+X-PasteGuard-PII-Detected: true
+```
+
+When routed to OpenAI or Anthropic:
+
+```
+X-PasteGuard-Mode: route
+X-PasteGuard-Provider: openai
+X-PasteGuard-PII-Detected: false
+```

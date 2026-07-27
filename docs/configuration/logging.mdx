@@ -1,0 +1,104 @@
+---
+title: Logging
+description: Configure request logging
+---
+
+```yaml
+logging:
+  driver: sqlite
+  database: ./data/pasteguard.db
+  retention_days: 30
+  log_masked_content: true
+```
+
+## Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `driver` | `sqlite` | Storage backend: `sqlite` or `postgres` |
+| `database` | `./data/pasteguard.db` | SQLite database path (used when `driver` is `sqlite`) |
+| `postgres_url` | — | Postgres connection string (required when `driver` is `postgres`) |
+| `retention_days` | `30` | Days to keep logs. `0` = forever |
+| `log_masked_content` | `true` | Store request text in the dashboard after masking |
+
+## Database
+
+Both backends share the same schema; the dashboard works identically on either. The schema is
+created and migrated automatically on startup.
+
+### SQLite (default)
+
+```yaml
+logging:
+  driver: sqlite
+  database: ./data/pasteguard.db
+```
+
+In Docker, this is persisted via volume:
+
+```yaml
+volumes:
+  - ./data:/pasteguard/data
+```
+
+### Postgres
+
+Use Postgres for shared or higher-volume deployments:
+
+```yaml
+logging:
+  driver: postgres
+  postgres_url: ${POSTGRES_URL:-postgres://pasteguard:pasteguard@localhost:5432/pasteguard}
+```
+
+`postgres_url` is required when `driver` is `postgres`; startup fails with a clear error if it is
+missing. The value supports environment-variable substitution, so you can keep credentials out of
+the config file.
+
+Existing SQLite databases are not migrated to Postgres automatically — switching `driver` starts
+logging into the new backend. An existing SQLite database created by an older PasteGuard version is
+upgraded in place the first time the new version starts.
+
+## Retention
+
+Logs older than `retention_days` are automatically deleted:
+
+```yaml
+logging:
+  retention_days: 30   # Keep for 30 days
+  # retention_days: 7  # Keep for 7 days
+  # retention_days: 0  # Keep forever
+```
+
+## Content Logging
+
+### Masked Content
+
+Stores a dashboard preview for text that PasteGuard scanned:
+
+```yaml
+logging:
+  log_masked_content: true
+```
+
+This is the default. It stores only roles in `scan_roles`, after PII and secrets are replaced
+with placeholders. System prompts, developer prompts, assistant messages, and agent context do not
+appear in the preview.
+
+### No Content
+
+Disable content logging:
+
+```yaml
+logging:
+  log_masked_content: false
+```
+
+Only metadata is logged.
+
+## Security
+
+- The dashboard preview stores only scanned spans (`scan_roles`) after masking; other roles never appear.
+- With `secrets_detection.action: route_local`, content is not logged when secrets are detected.
+- Secret logs store secret types only, never the raw secret value.
+- Placeholders look like `[[EMAIL_ADDRESS_1]]` or `[[API_KEY_SK_1]]`.

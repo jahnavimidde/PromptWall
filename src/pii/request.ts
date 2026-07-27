@@ -1,0 +1,72 @@
+/**
+ * PII request helpers - detect and mask PII in requests
+ */
+
+import type { PlaceholderContext } from "../masking/context";
+import type { RequestExtractor } from "../masking/types";
+import { getPIIDetector, type PIIDetectionResult } from "./detect";
+import { createMaskingContext, maskRequest } from "./mask";
+
+export interface PIIDetectResult {
+  detection: PIIDetectionResult;
+  hasPII: boolean;
+}
+
+export interface PIIMaskResult<TRequest> {
+  request: TRequest;
+  maskingContext: PlaceholderContext;
+}
+
+/**
+ * Detect PII in a request
+ */
+export async function detectPII<TRequest, TResponse>(
+  request: TRequest,
+  extractor: RequestExtractor<TRequest, TResponse>,
+  // Required (no default) so a new route can't silently skip the secrets placeholders.
+  knownPlaceholders: readonly string[],
+): Promise<PIIDetectResult> {
+  const detector = getPIIDetector();
+  const detection = await detector.analyzeRequest(request, extractor, knownPlaceholders);
+
+  return {
+    detection,
+    hasPII: detection.hasPII,
+  };
+}
+
+/**
+ * Mask PII in a request
+ */
+export function maskPII<TRequest, TResponse>(
+  request: TRequest,
+  detection: PIIDetectionResult,
+  extractor: RequestExtractor<TRequest, TResponse>,
+  existingContext?: PlaceholderContext,
+): PIIMaskResult<TRequest> {
+  if (!detection.hasPII) {
+    return {
+      request,
+      maskingContext: existingContext ?? createMaskingContext(),
+    };
+  }
+
+  const result = maskRequest(request, detection, extractor, existingContext);
+
+  return {
+    request: result.request,
+    maskingContext: result.context,
+  };
+}
+
+export type { PlaceholderContext } from "../masking/context";
+export type { PIIDetectionResult, PIIEntity } from "./detect";
+export { createMaskingContext } from "./mask";
+
+/**
+ * Check if the detector is healthy
+ */
+export async function healthCheck(): Promise<boolean> {
+  const detector = getPIIDetector();
+  return detector.healthCheck();
+}

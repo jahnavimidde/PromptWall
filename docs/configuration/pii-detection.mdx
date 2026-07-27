@@ -1,0 +1,141 @@
+---
+title: PII Detection Config
+description: Configure PII detection settings
+---
+
+```yaml
+pii_detection:
+  detector_url: http://localhost:5002
+  detector_timeout: 30
+  phone_regions: []
+  score_threshold: 0.7
+  entities:
+    - PERSON
+    - LOCATION
+    - EMAIL_ADDRESS
+    - PHONE_NUMBER
+    - CREDIT_CARD
+    - IBAN_CODE
+    - IP_ADDRESS
+    - VAT_CODE
+```
+
+## Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `detector_url` | `http://localhost:5002` | Detector `/analyze` URL |
+| `detector_timeout` | `30` | Timeout in seconds for each detector `/analyze` request. Increase for very large messages; set to `0` to disable |
+| `phone_regions` | `[]` | Optional regions for national-format phone numbers |
+| `score_threshold` | `0.7` | Minimum confidence floor for the neural labels PERSON and LOCATION (0.0-1.0). Checksum-validated identifiers always score `1.0` and are unaffected |
+| `entities` | See below | Entity types to return |
+
+## Phone Regions
+
+Detection is **multilingual and language-agnostic**. Names and places use one model. Structured identifiers use format or checksum checks.
+
+Phone numbers are `+` international-only by default. Add `phone_regions` only when you need local formats.
+
+```yaml
+pii_detection:
+  phone_regions:
+    - US
+    - GB
+    - DE
+    - IT
+    - IN
+```
+
+Keep the list focused. More regions can mean more false positives on IDs and ticket numbers.
+
+## Entities
+
+| Entity | Examples |
+|--------|----------|
+| `PERSON` | Dr. Sarah Chen, John Smith |
+| `LOCATION` | New York, München |
+| `EMAIL_ADDRESS` | sarah.chen@hospital.org |
+| `PHONE_NUMBER` | +49 171 1234567 |
+| `CREDIT_CARD` | 4111 1111 1111 1111 |
+| `IBAN_CODE` | DE89 3704 0044 0532 0130 00 |
+| `IP_ADDRESS` | 192.168.1.1 |
+| `VAT_CODE` | EU VAT number, e.g. `DE136695976`, `IT00743110157`, `FR40303265045` |
+
+Names and locations are multilingual. IBAN, credit card, email, IP, and `+` phone numbers work internationally. `VAT_CODE` requires a country prefix and is validated with `python-stdnum`.
+
+## Score Threshold
+
+`score_threshold` raises the confidence floor for the **tunable** neural labels
+**PERSON** and **LOCATION** only. Higher = fewer false positives, might miss
+some PII; lower = catches more, more false positives.
+
+```yaml
+pii_detection:
+  score_threshold: 0.7  # Default, good balance
+  # score_threshold: 0.5  # More aggressive
+  # score_threshold: 0.9  # More conservative (PERSON/LOCATION)
+```
+
+Checksum-validated identifiers are always reported (score `1.0`) and are never
+dropped by the threshold. Tune the neural labels per deployment via the
+`DETECTOR_FLOOR_PERSON`, `DETECTOR_FLOOR_LOCATION`, and `DETECTOR_FLOOR_ADDRESS`
+environment variables on the detector service — e.g. `DETECTOR_FLOOR_PERSON=0.9`
+(fewer person false positives) or `DETECTOR_FLOOR_LOCATION=0.4` (more location
+recall). Street addresses are detected by the model and reported as `LOCATION`.
+
+## Allowlist
+
+Exclude specific text patterns from PII masking. Useful for preventing false positives on company names or product identifiers.
+
+```yaml
+masking:
+  allowlist:
+    - pattern: "Acme Corp"
+    - pattern: "Product XYZ"
+    - pattern: 'TEST-\d+'
+      regex: true
+```
+
+A literal entry is matched as a substring: a detected value is left unmasked if it contains the entry, or the entry contains it. Set `regex: true` for JavaScript regex syntax — a regex entry must match the **entire** detected value, so `\d{4}` won't unmask a longer number that merely contains four digits.
+
+## Denylist
+
+Force specific text or regex patterns to be masked, even when the detector does not report them or PII detection is disabled. Each entry needs a `type`, which is used for the placeholder name.
+
+```yaml
+masking:
+  denylist:
+    - pattern: "ProjectX"
+      type: PROJECT_NAME
+    - pattern: 'CUST-\d{6}'
+      type: CUSTOMER_ID
+      regex: true
+```
+
+Patterns are matched literally by default. Set `regex: true` for JavaScript regex syntax — use single quotes in YAML when the pattern contains backslashes. A regex pattern must not match the empty string (use `\d+`, not `\d*`); empty-matching patterns are rejected at startup because they would mask nothing.
+
+## Scan Roles
+
+By default, PasteGuard scans user messages and tool results. It skips system, developer,
+and assistant text. Set `scan_roles` to replace that default:
+
+```yaml
+pii_detection:
+  scan_roles:
+    - user
+    - tool
+    - function
+    - mcp
+```
+
+| Scan label | Description |
+|------------|-------------|
+| `user` | User messages |
+| `assistant` | Assistant responses |
+| `system` | System prompts |
+| `developer` | Developer prompts |
+| `tool` | Tool results, including file reads and shell output |
+| `function` | Legacy OpenAI function results |
+| `mcp` | PasteGuard internal label for MCP tool items, such as Codex `mcp_tool_call` output |
+
+If `scan_roles` is set, PasteGuard scans exactly those roles.
