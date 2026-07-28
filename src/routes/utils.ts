@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { getConfig } from "../config";
-import type { RequestLogData, RequestSource } from "../logging/logger";
+import type { RequestLogData, RequestProvider, RequestSource } from "../logging/logger";
 import { logRequest } from "../logging/logger";
 import type { PIIDetectResult } from "../pii/request";
 import { ProviderError } from "../providers/errors";
@@ -158,8 +158,14 @@ export function toSecretsHeaderData<T>(
   };
 }
 
+/** Actual LLM providers that can be routed to and can fail. Derived from RequestProvider (DB schema). */
+export type ProviderId = Exclude<RequestProvider, "api">;
+
+/** All provider values that may appear in logs, including the internal API category. */
+export type LogProviderId = RequestProvider;
+
 export interface CreateLogDataOptions {
-  provider: "openai" | "anthropic" | "codex" | "local" | "api";
+  provider: LogProviderId;
   source?: RequestSource;
   model: string;
   startTime: number;
@@ -199,7 +205,7 @@ export function createLogData(options: CreateLogDataOptions): RequestLogData {
 // ============================================================================
 
 export interface ProviderErrorContext {
-  provider: "openai" | "anthropic" | "codex" | "local";
+  provider: ProviderId;
   model: string;
   startTime: number;
   pii?: PIILogData;

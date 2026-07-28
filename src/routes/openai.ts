@@ -32,6 +32,7 @@ import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
 import {
   createLogData,
+  type ProviderId,
   errorFormats,
   handleProviderError,
   setBlockedHeaders,
@@ -70,7 +71,7 @@ openaiRoutes.post(
     // ── Dynamic provider selection ────────────────────────────────────────────
     // Read `provider` from the request body; fall back to DEFAULT_PROVIDER ("gemini").
     // This field is stripped before the request is forwarded upstream.
-    const selectedProvider: string = request.provider ?? DEFAULT_PROVIDER;
+    const selectedProvider = (request.provider ?? DEFAULT_PROVIDER) as ProviderId;
 
     let privacy: PrivacyPipelineResult<OpenAIRequest>;
     let afterSecretsTime = 0;
@@ -232,7 +233,7 @@ function normalizeOpenAIPath(path: string): string | undefined {
 
 interface ProviderOptions {
   /** The provider id to route to (e.g. "gemini", "openai"). */
-  provider: string;
+  provider: ProviderId;
   request: OpenAIRequest;
   piiResult: PIIDetectResult;
   piiMaskingContext?: PlaceholderContext;
@@ -282,7 +283,7 @@ function respondBlocked(
   body: OpenAIRequest,
   secretsResult: SecretsProcessResult<OpenAIRequest>,
   startTime: number,
-  provider: string,
+  provider: ProviderId,
 ) {
   const secretTypes = secretsResult.blockedTypes ?? [];
 
@@ -310,7 +311,7 @@ function respondBlocked(
   );
 }
 
-function respondDetectionError(c: Context, body: OpenAIRequest, startTime: number, provider: string) {
+function respondDetectionError(c: Context, body: OpenAIRequest, startTime: number, provider: ProviderId) {
   logRequest(
     createLogData({
       provider,
