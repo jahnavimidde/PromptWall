@@ -13,9 +13,12 @@
     "types": ["bun"],
     "lib": ["ESNext", "DOM"],
     "outDir": "dist",
-    "rootDir": "src",
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    "paths": {
+      "@promptwall/engine": ["./packages/engine/src/index.ts"],
+      "@promptwall/engine/*": ["./packages/engine/src/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist"]

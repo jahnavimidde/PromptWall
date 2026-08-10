@@ -27,6 +27,7 @@ import {
   OpenAIRequestSchema,
   type OpenAIResponse,
 } from "../providers/openai/types";
+import { DetectionPipeline, type DetectionRequest, type PipelineResult } from "@promptwall/engine";
 import { providerRegistry } from "../providers/registry";
 import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
@@ -43,6 +44,9 @@ import {
   toSecretsHeaderData,
   toSecretsLogData,
 } from "./utils";
+
+// Initialize the core security engine pipeline once at startup / module scope
+const detectionPipeline = new DetectionPipeline();
 
 export const openaiRoutes = new Hono();
 
@@ -72,6 +76,58 @@ openaiRoutes.post(
     // Read `provider` from the request body; fall back to DEFAULT_PROVIDER ("gemini").
     // This field is stripped before the request is forwarded upstream.
     const selectedProvider = (request.provider ?? DEFAULT_PROVIDER) as ProviderId;
+
+    // ── DetectionPipeline Integration (Milestone 4A) ──────────────────────────
+    let pipelineResult: PipelineResult | undefined;
+    try {
+      const extractedContent = openaiExtractor
+        .extractTexts(request)
+        .map((t) => t.text)
+        .join("\n");
+
+      const detectionReq: DetectionRequest = {
+        content: extractedContent,
+        mimeType: "text/plain",
+        metadata: {
+          model: request.model ?? "unknown",
+          provider: selectedProvider,
+          requestId,
+        },
+      };
+
+      pipelineResult = await detectionPipeline.run(detectionReq);
+
+      // Set security policy response headers
+      c.header("X-PasteGuard-Policy-Action", pipelineResult.policyDecision.action);
+      c.header("X-PasteGuard-Risk-Level", pipelineResult.riskAssessment.level);
+      c.header("X-PasteGuard-Risk-Score", pipelineResult.riskAssessment.score.toFixed(1));
+
+      // Enforce BLOCK action immediately (prevents any call to LLM providers)
+      if (pipelineResult.policyDecision.action === "block") {
+        logRequest(
+          createLogData({
+            provider: selectedProvider,
+            model: request.model || "unknown",
+            startTime,
+            statusCode: 400,
+            errorMessage: pipelineResult.policyDecision.reason,
+          }),
+          c.req.header("User-Agent") || null,
+        );
+
+        return c.json(
+          errorFormats.openai.error(
+            `Request blocked by security policy: ${pipelineResult.policyDecision.reason}`,
+            "invalid_request_error",
+            "policy_blocked",
+          ),
+          400,
+        );
+      }
+    } catch (error) {
+      console.error("[Engine Error] DetectionPipeline execution failed:", error);
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     let privacy: PrivacyPipelineResult<OpenAIRequest>;
     let afterSecretsTime = 0;

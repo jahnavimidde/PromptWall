@@ -56,3 +56,52 @@ export type {
 export { DummyDetector } from "./testing/DummyDetector";
 export { HangingDetector } from "./testing/HangingDetector";
 export { FailingDetector } from "./testing/FailingDetector";
+
+// ── risk/ ─────────────────────────────────────────────────────────────────────
+export type { RiskLevel, RiskThresholds } from "./risk/RiskLevel";
+export { DEFAULT_RISK_THRESHOLDS, resolveRiskLevel } from "./risk/RiskLevel";
+export type { RiskFactorType, RiskFactor } from "./risk/RiskFactor";
+export type { RiskAssessment } from "./risk/RiskAssessment";
+export type { RiskScoringContext } from "./risk/RiskScoringContext";
+export {
+  RiskEngine,
+  DEFAULT_SEVERITY_WEIGHTS,
+} from "./risk/RiskEngine";
+export type { RiskEngineOptions, SeverityWeights } from "./risk/RiskEngine";
+
+// ── policy/ ───────────────────────────────────────────────────────────────────
+export type { PolicyAction } from "./policy/PolicyAction";
+export { ACTION_PRECEDENCE, highestPrecedenceAction } from "./policy/PolicyAction";
+export type { PolicyRule } from "./policy/PolicyRule";
+export type { PolicyDecision } from "./policy/PolicyDecision";
+export {
+  PolicyEngine,
+  DEFAULT_POLICY_RULES,
+} from "./policy/PolicyEngine";
+export type { PolicyEngineOptions } from "./policy/PolicyEngine";
+
+// ── detectors/ ────────────────────────────────────────────────────────────────
+export {
+  SecretRegexDetector,
+  EntropySecretDetector,
+  calculateShannonEntropy,
+  CreditCardDetector,
+  isValidLuhn,
+  PiiGlinerDetector,
+  PromptInjectionDetector,
+  createDefaultDetectors,
+  registerDefaultDetectors,
+} from "./detectors";
+export type { PiiGlinerDetectorOptions } from "./detectors";
+
+// ── graph/ resolvers ──────────────────────────────────────────────────────────
+export { OverlapMergingResolver } from "./graph/OverlapMergingResolver";
+
+// ── pipeline/ ─────────────────────────────────────────────────────────────────
+export { DetectionPipeline } from "./pipeline/DetectionPipeline";
+export type {
+  DetectionPipelineOptions,
+  PipelineResult,
+} from "./pipeline/DetectionPipeline";
+
+
