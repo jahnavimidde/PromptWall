@@ -6,15 +6,20 @@ import { logger } from "hono/logger";
 import pkg from "../package.json";
 import { getConfig } from "./config";
 import { getLogger } from "./logging/logger";
+import { getAuditLogger } from "./logging/audit-logger";
 import { getPIIDetector } from "./pii/detect";
+import { UserStore } from "./auth/user-store";
 import { anthropicRoutes } from "./routes/anthropic";
 import { apiRoutes } from "./routes/api";
+import { auditRoutes } from "./routes/audit";
+import { authRoutes } from "./routes/auth";
 import { codexRoutes } from "./routes/codex";
 import { dashboardRoutes } from "./routes/dashboard";
 import { healthRoutes } from "./routes/health";
 import { infoRoutes } from "./routes/info";
 import { landingRoutes } from "./routes/landing";
 import { openaiRoutes } from "./routes/openai";
+import { policyRoutes } from "./routes/policies";
 
 type Variables = {
   requestId: string;
@@ -53,6 +58,9 @@ app.route("/openai", openaiRoutes);
 app.route("/anthropic", anthropicRoutes);
 app.route("/codex", codexRoutes);
 app.route("/api", apiRoutes);
+app.route("/api/audit", auditRoutes);
+app.route("/api/auth", authRoutes);
+app.route("/api/policies", policyRoutes);
 
 if (config.dashboard.enabled) {
   app.route("/dashboard", dashboardRoutes);
@@ -159,6 +167,9 @@ Providers:
   Codex:  ${config.providers.codex.base_url}`;
 
   console.log(`
+// Seed initial admin user if env credentials exist
+void new UserStore().seedAdminFromEnv();
+
 ╔═══════════════════════════════════════════════════════════╗
 ║                       PromptWall                          ║
 ║             Enterprise AI Security Gateway                ║
@@ -198,13 +209,16 @@ async function startCleanupScheduler(config: ReturnType<typeof getConfig>): Prom
 
   if (config.logging.retention_days > 0) {
     const logger = getLogger();
+    const auditLogger = getAuditLogger();
 
     // Run cleanup on startup
     try {
-      const deleted = await logger.cleanup();
-      if (deleted > 0) {
+      const deletedLogs = await logger.cleanup();
+      const deletedAudit = await auditLogger.cleanup();
+      const total = deletedLogs + deletedAudit;
+      if (total > 0) {
         console.log(
-          `Log cleanup: removed ${deleted} entries older than ${config.logging.retention_days} days`,
+          `Log cleanup: removed ${deletedLogs} logs and ${deletedAudit} security events older than ${config.logging.retention_days} days`,
         );
       }
     } catch (error) {
@@ -216,10 +230,12 @@ async function startCleanupScheduler(config: ReturnType<typeof getConfig>): Prom
       () => {
         void (async () => {
           try {
-            const count = await logger.cleanup();
-            if (count > 0) {
+            const countLogs = await logger.cleanup();
+            const countAudit = await auditLogger.cleanup();
+            const total = countLogs + countAudit;
+            if (total > 0) {
               console.log(
-                `Log cleanup: removed ${count} entries older than ${config.logging.retention_days} days`,
+                `Log cleanup: removed ${countLogs} logs and ${countAudit} security events older than ${config.logging.retention_days} days`,
               );
             }
           } catch (error) {

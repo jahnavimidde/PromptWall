@@ -161,17 +161,19 @@ export class SqliteAuditLogger implements AuditLogger {
   /**
    * Delete events older than `retentionDays`.
    *
+   * @param retentionDays - Optional override for retention cutoff days (defaults to config value).
    * @returns Number of rows deleted (0 when retention is disabled).
    */
-  async cleanup(): Promise<number> {
+  async cleanup(retentionDays?: number): Promise<number> {
     await this.ready;
 
-    if (this.retentionDays <= 0) {
+    const days = retentionDays ?? this.retentionDays;
+    if (days <= 0) {
       return 0;
     }
 
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - this.retentionDays);
+    cutoffDate.setDate(cutoffDate.getDate() - days);
 
     const result = await this.db
       .deleteFrom("security_events")
@@ -184,6 +186,9 @@ export class SqliteAuditLogger implements AuditLogger {
   async close(): Promise<void> {
     await this.ready;
     await this.db.destroy();
+    if (auditLoggerInstance === this) {
+      auditLoggerInstance = null;
+    }
   }
 }
 

@@ -65,9 +65,34 @@ export interface SecurityEventsTable {
   created_at: ColumnType<string | null, string | undefined, never>;
 }
 
+export interface SecurityPoliciesTable {
+  id: string;
+  name: string;
+  description: string | null;
+  priority: number;
+  enabled: number;               // 1 = active, 0 = disabled
+  conditions: string;            // JSON: { riskLevel, minRiskScore, category, subtype, detector, provider, severity }
+  action: string;                // "allow" | "mask" | "block"
+  reason: string | null;
+  created_by: string;
+  created_at: ColumnType<string | null, string | undefined, never>;
+  updated_at: ColumnType<string | null, string | undefined, string | undefined>;
+}
+
+export interface UsersTable {
+  id: string;
+  email: string;
+  password_hash: string;
+  role: string;                  // "ADMIN" | "SECURITY_ANALYST" | "VIEWER"
+  created_at: ColumnType<string | null, string | undefined, never>;
+  updated_at: ColumnType<string | null, string | undefined, never>;
+}
+
 export interface LogDatabase {
   request_logs: RequestLogsTable;
   security_events: SecurityEventsTable;
+  security_policies: SecurityPoliciesTable;
+  users: UsersTable;
 }
 
 interface MigrationDatabase extends LogDatabase {
@@ -147,6 +172,8 @@ export async function migrateLogDatabase(db: LogKysely, driver: LoggingDriver): 
     provider: new InlineMigrationProvider({
       "0001_request_logs": createRequestLogsMigration(driver),
       "0002_security_events": createSecurityEventsMigration(driver),
+      "0003_security_policies": createSecurityPoliciesMigration(driver),
+      "0004_users": createUsersMigration(driver),
     }),
   });
 
@@ -229,6 +256,59 @@ function createSecurityEventsMigration(driver: LoggingDriver): Migration {
         .execute();
 
       await createSecurityEventIndexes(db);
+    },
+  };
+}
+
+function createSecurityPoliciesMigration(driver: LoggingDriver): Migration {
+  return {
+    async up(db) {
+      const createTable = db.schema.createTable("security_policies").ifNotExists();
+
+      await createTable
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("name", "text", (column) => column.notNull())
+        .addColumn("description", "text")
+        .addColumn("priority", "integer", (column) => column.notNull().defaultTo(10))
+        .addColumn("enabled", "integer", (column) => column.notNull().defaultTo(1))
+        .addColumn("conditions", "text", (column) => column.notNull().defaultTo("{}"))
+        .addColumn("action", "text", (column) => column.notNull())
+        .addColumn("reason", "text")
+        .addColumn("created_by", "text", (column) => column.notNull().defaultTo("system"))
+        .addColumn("created_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .addColumn("updated_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .execute();
+
+      await db.schema
+        .createIndex("idx_sp_enabled_priority")
+        .ifNotExists()
+        .on("security_policies")
+        .columns(["enabled", "priority"])
+        .execute();
+    },
+  };
+}
+
+function createUsersMigration(driver: LoggingDriver): Migration {
+  return {
+    async up(db) {
+      const createTable = db.schema.createTable("users").ifNotExists();
+
+      await createTable
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("email", "text", (column) => column.notNull().unique())
+        .addColumn("password_hash", "text", (column) => column.notNull())
+        .addColumn("role", "text", (column) => column.notNull().defaultTo("VIEWER"))
+        .addColumn("created_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .addColumn("updated_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .execute();
+
+      await db.schema
+        .createIndex("idx_users_email")
+        .ifNotExists()
+        .on("users")
+        .column("email")
+        .execute();
     },
   };
 }

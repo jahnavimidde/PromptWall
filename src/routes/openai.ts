@@ -7,6 +7,7 @@ import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
 import { formatMaskedRequestForLog } from "../logging/log-content";
 import { logRequest } from "../logging/logger";
 import { logSecurityEvent } from "../logging/audit-logger";
+import { getPolicyEngine } from "../policy/runtime";
 import type { PlaceholderContext } from "../masking/context";
 import { openaiExtractor } from "../masking/extractors/openai";
 import { restoreResponse } from "../masking/restorer";
@@ -122,7 +123,9 @@ openaiRoutes.post(
       };
 
       const detectionStartTime = Date.now();
-      pipelineResult = await detectionPipeline.run(detectionReq);
+      const dynamicPolicyEngine = await getPolicyEngine();
+      const dynamicPipeline = new DetectionPipeline({ registry: _engineRegistry, policyEngine: dynamicPolicyEngine });
+      pipelineResult = await dynamicPipeline.run(detectionReq);
       const detectionLatencyMs = Date.now() - detectionStartTime;
 
       // Set security policy response headers
