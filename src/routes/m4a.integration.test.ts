@@ -29,8 +29,12 @@ describe("M4A — HTTP Integration Pipeline Tests", () => {
   test("A. Normal request with clean text is ALLOWED and reaches provider", async () => {
     let providerFetchCalled = false;
 
-    (globalThis.fetch as unknown) = async (input: string | URL | Request) => {
+    (globalThis.fetch as unknown) = async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      // Pass detector calls through to the real service
+      if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
+        return originalFetch(input, init);
+      }
       if (url.includes("openai.com") || url.includes("googleapis.com") || url.includes("anthropic.com")) {
         providerFetchCalled = true;
       }
@@ -68,8 +72,12 @@ describe("M4A — HTTP Integration Pipeline Tests", () => {
   test("B & F. Dynamic secret triggers BLOCK policy and PREVENTS provider call", async () => {
     let providerFetchCalled = false;
 
-    (globalThis.fetch as unknown) = async (input: string | URL | Request) => {
+    (globalThis.fetch as unknown) = async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      // Pass detector calls through to the real service
+      if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
+        return originalFetch(input, init);
+      }
       if (url.includes("openai.com") || url.includes("googleapis.com") || url.includes("anthropic.com")) {
         providerFetchCalled = true;
       }
@@ -119,8 +127,12 @@ describe("M4A — HTTP Integration Pipeline Tests", () => {
   test("D. Prompt injection triggers security pipeline BLOCK", async () => {
     let providerFetchCalled = false;
 
-    (globalThis.fetch as unknown) = async (input: string | URL | Request) => {
+    (globalThis.fetch as unknown) = async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      // Pass detector calls through to the real service
+      if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
+        return originalFetch(input, init);
+      }
       if (url.includes("openai.com") || url.includes("googleapis.com") || url.includes("anthropic.com")) {
         providerFetchCalled = true;
       }
@@ -145,8 +157,12 @@ describe("M4A — HTTP Integration Pipeline Tests", () => {
   test("E. ALLOW path reaches existing provider pipeline correctly", async () => {
     let providerFetchCalled = false;
 
-    (globalThis.fetch as unknown) = async (input: string | URL | Request) => {
+    (globalThis.fetch as unknown) = async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      // Pass detector calls through to the real service
+      if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
+        return originalFetch(input, init);
+      }
       if (url.includes("openai.com") || url.includes("googleapis.com") || url.includes("anthropic.com")) {
         providerFetchCalled = true;
       }

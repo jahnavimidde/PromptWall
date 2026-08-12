@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .deterministic import detect_deterministic
 from .gliner_layer import detect_gliner, load_model
 from .merge import merge
+from .semantic_injection import load_semantic_model, predict_injection
 
 
 def _utf16_mapper(text: str):
@@ -38,13 +39,22 @@ class Entity(BaseModel):
     score: float
 
 
+class InjectionAnalyzeRequest(BaseModel):
+    text: str
+
+
+class InjectionAnalyzeResponse(BaseModel):
+    score: float
+    label: str
+    intent: str
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Load the model before serving so /health == ready (PromptWall polls it).
-    # asyncio.to_thread keeps the event loop unblocked during the load (allows
-    # signal handling, logging, etc.) without changing readiness semantics:
-    # /health is still only reachable after the model is fully loaded.
-    await asyncio.to_thread(load_model)
+    # Load the semantic model before serving so /health == ready (PromptWall polls it).
+    await asyncio.to_thread(load_semantic_model)
+    # Warm load GLiNER PII model concurrently in background task
+    asyncio.create_task(asyncio.to_thread(load_model))
     yield
 
 
@@ -71,3 +81,18 @@ def analyze(req: AnalyzeRequest) -> list[Entity]:
         )
         for s in spans
     ]
+
+
+@app.post("/analyze/injection", response_model=InjectionAnalyzeResponse)
+def analyze_injection(req: InjectionAnalyzeRequest) -> InjectionAnalyzeResponse:
+    try:
+        res = predict_injection(req.text)
+        return InjectionAnalyzeResponse(
+            score=res["score"],
+            label=res["label"],
+            intent=res["intent"],
+        )
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Semantic injection analysis failed")
+

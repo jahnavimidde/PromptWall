@@ -21,10 +21,13 @@ mock.module("../pii/detect", () => ({
 
 // Mock the logger to avoid database operations
 mock.module("../logging/logger", () => ({
+  Logger: class MockLogger {},
+  getLogger: mock(() => ({ log: mock(() => Promise.resolve()) })),
   logRequest: mock(() => {}),
   normalizeRequestSource: mock((provider: string, sourceHeader?: string | null) =>
     provider === "api" && sourceHeader === "browser-extension" ? "browser_extension" : provider,
   ),
+  closeLogger: mock(() => Promise.resolve()),
 }));
 
 // Enable every secret type so the ordering test doesn't depend on the ambient config.

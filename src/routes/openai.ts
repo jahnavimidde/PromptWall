@@ -27,7 +27,18 @@ import {
   OpenAIRequestSchema,
   type OpenAIResponse,
 } from "../providers/openai/types";
-import { DetectionPipeline, type DetectionRequest, type PipelineResult } from "@promptwall/engine";
+import {
+  DetectionPipeline,
+  DetectorRegistry,
+  PromptInjectionDetector,
+  SemanticInjectionDetector,
+  SecretRegexDetector,
+  EntropySecretDetector,
+  CreditCardDetector,
+  PiiGlinerDetector,
+  type DetectionRequest,
+  type PipelineResult,
+} from "@promptwall/engine";
 import { providerRegistry } from "../providers/registry";
 import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
@@ -45,8 +56,22 @@ import {
   toSecretsLogData,
 } from "./utils";
 
-// Initialize the core security engine pipeline once at startup / module scope
-const detectionPipeline = new DetectionPipeline();
+// ── DetectionPipeline — configured at module scope ────────────────────────────
+// Build a registry that wires PiiGlinerDetector and SemanticInjectionDetector
+// to the configured detector URL (config.pii_detection.detector_url).
+const _startupConfig = getConfig();
+const _engineRegistry = new DetectorRegistry();
+_engineRegistry.register(new PromptInjectionDetector());
+_engineRegistry.register(
+  new SemanticInjectionDetector({ serviceUrl: _startupConfig.pii_detection.detector_url }),
+);
+_engineRegistry.register(new SecretRegexDetector());
+_engineRegistry.register(new EntropySecretDetector());
+_engineRegistry.register(new CreditCardDetector());
+_engineRegistry.register(
+  new PiiGlinerDetector({ serviceUrl: _startupConfig.pii_detection.detector_url }),
+);
+const detectionPipeline = new DetectionPipeline({ registry: _engineRegistry });
 
 export const openaiRoutes = new Hono();
 
@@ -129,13 +154,24 @@ openaiRoutes.post(
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    // ── Make engine PolicyDecision authoritative for masking (M4B) ───────────
+    // When the engine decides 'mask', force the privacy pipeline to apply PII
+    // masking regardless of config.mode. This ensures the engine's policy is
+    // the single source of truth rather than an advisory signal.
+    const engineAction = pipelineResult?.policyDecision.action;
+    const effectiveConfig =
+      engineAction === "mask" && config.mode !== "mask"
+        ? { ...config, mode: "mask" as const }
+        : config;
+    // ─────────────────────────────────────────────────────────────────────────
+
     let privacy: PrivacyPipelineResult<OpenAIRequest>;
     let afterSecretsTime = 0;
     let afterPIITime = 0;
     try {
-      // Run the existing privacy pipeline. We capture timestamps around it
-      // only when demo mode is active to avoid unnecessary Date.now() calls.
-      privacy = await processPrivacyPipeline(request, config, openaiExtractor);
+      // Run the existing privacy pipeline with the effective config so that a
+      // 'mask' engine decision forces PII masking even in route mode.
+      privacy = await processPrivacyPipeline(request, effectiveConfig, openaiExtractor);
       if (isDemoMode) {
         // processPrivacyPipeline runs secrets then PII internally; we approximate
         // the split using the reported scanTimeMs from piiResult.
@@ -144,8 +180,35 @@ openaiRoutes.post(
       }
     } catch (error) {
       if (error instanceof PrivacyPipelineDetectionError) {
-        console.error("PII detection error:", error.cause ?? error);
-        return respondDetectionError(c, error.request as OpenAIRequest, startTime, selectedProvider);
+        // Graceful degradation: the PII masking detector is unavailable, but the
+        // security decision (BLOCK) was already enforced above by the engine before
+        // reaching this point. The privacy pipeline PII detection is for masking
+        // only. Degrade to no-PII-masking mode (forward request after secrets
+        // processing) rather than returning 503 and blocking the user entirely.
+        // This matches the behaviour of pii_detection.enabled: false.
+        console.error(
+          "[PII] Detection service unavailable — continuing without PII masking:",
+          error.cause ?? error,
+        );
+        const fallbackSecretsResult = error.secretsResult as SecretsProcessResult<OpenAIRequest>;
+        if (fallbackSecretsResult.blocked) {
+          return respondBlocked(c, request, fallbackSecretsResult, startTime, selectedProvider);
+        }
+        const fallbackRequest = (error.request as OpenAIRequest) ?? request;
+        const fallbackPiiResult: PIIDetectResult = {
+          detection: { hasPII: false, spanEntities: [], allEntities: [], scanTimeMs: 0 },
+          hasPII: false,
+        };
+        return sendToProvider(c, request, {
+          provider: selectedProvider,
+          request: fallbackRequest,
+          piiResult: fallbackPiiResult,
+          secretsResult: fallbackSecretsResult,
+          startTime,
+          authHeader: c.req.header("Authorization"),
+          isDemoMode,
+          requestId,
+        });
       }
       throw error;
     }
@@ -160,7 +223,7 @@ openaiRoutes.post(
       throw new Error("PII detection result missing from privacy pipeline");
     }
 
-    if (config.mode === "mask") {
+    if (effectiveConfig.mode === "mask") {
       return sendToProvider(c, request, {
         provider: selectedProvider,
         request: privacy.request,

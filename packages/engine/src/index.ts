@@ -89,10 +89,11 @@ export {
   isValidLuhn,
   PiiGlinerDetector,
   PromptInjectionDetector,
+  SemanticInjectionDetector,
   createDefaultDetectors,
   registerDefaultDetectors,
 } from "./detectors";
-export type { PiiGlinerDetectorOptions } from "./detectors";
+export type { PiiGlinerDetectorOptions, SemanticInjectionDetectorOptions } from "./detectors";
 
 // ── graph/ resolvers ──────────────────────────────────────────────────────────
 export { OverlapMergingResolver } from "./graph/OverlapMergingResolver";

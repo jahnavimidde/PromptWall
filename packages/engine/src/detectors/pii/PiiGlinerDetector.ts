@@ -13,9 +13,9 @@ import type { DetectionRequest } from "../../detector/DetectionRequest";
 import type { Detector, DetectorCapabilities } from "../../detector/Detector";
 
 export interface PiiGlinerDetectorOptions {
-  readonly serviceUrl?: string;
-  readonly timeoutMs?: number;
-  readonly scoreThreshold?: number;
+  readonly serviceUrl?: string | undefined;
+  readonly timeoutMs?: number | undefined;
+  readonly scoreThreshold?: number | undefined;
 }
 
 interface GlinerEntity {

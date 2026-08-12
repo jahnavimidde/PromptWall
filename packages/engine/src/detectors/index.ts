@@ -10,6 +10,7 @@ import { EntropySecretDetector } from "./secrets/EntropySecretDetector";
 import { CreditCardDetector } from "./pii/CreditCardDetector";
 import { PiiGlinerDetector } from "./pii/PiiGlinerDetector";
 import { PromptInjectionDetector } from "./injection/PromptInjectionDetector";
+import { SemanticInjectionDetector } from "./injection/SemanticInjectionDetector";
 import type { Detector } from "../detector/Detector";
 import type { DetectorRegistry } from "../detector/DetectorRegistry";
 
@@ -19,18 +20,24 @@ export { CreditCardDetector, isValidLuhn } from "./pii/CreditCardDetector";
 export { PiiGlinerDetector } from "./pii/PiiGlinerDetector";
 export type { PiiGlinerDetectorOptions } from "./pii/PiiGlinerDetector";
 export { PromptInjectionDetector } from "./injection/PromptInjectionDetector";
+export { SemanticInjectionDetector } from "./injection/SemanticInjectionDetector";
+export type { SemanticInjectionDetectorOptions } from "./injection/SemanticInjectionDetector";
+
+export interface DefaultDetectorsOptions {
+  readonly serviceUrl?: string | undefined;
+}
 
 /**
  * Instantiate the default production detector set.
  * Note: DummyDetector is explicitly excluded from production default set.
  */
-export function createDefaultDetectors(): Detector[] {
+export function createDefaultDetectors(options: DefaultDetectorsOptions = {}): Detector[] {
   return [
     new PromptInjectionDetector(),
     new SecretRegexDetector(),
     new EntropySecretDetector(),
     new CreditCardDetector(),
-    new PiiGlinerDetector(),
+    new PiiGlinerDetector({ serviceUrl: options.serviceUrl }),
   ];
 }
 
