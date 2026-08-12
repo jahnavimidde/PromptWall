@@ -105,4 +105,7 @@ export type {
   PipelineResult,
 } from "./pipeline/DetectionPipeline";
 
-
+// ── audit/ ────────────────────────────────────────────────────────────────────
+export type { CandidateSummary, SecurityEvent } from "./audit/SecurityEvent";
+export { buildSecurityEvent } from "./audit/SecurityEvent";
+export type { AuditLogger } from "./audit/AuditLogger";

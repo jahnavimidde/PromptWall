@@ -6,6 +6,7 @@ import { getConfig, type MaskingConfig } from "../config";
 import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
 import { formatMaskedRequestForLog } from "../logging/log-content";
 import { logRequest } from "../logging/logger";
+import { logSecurityEvent } from "../logging/audit-logger";
 import type { PlaceholderContext } from "../masking/context";
 import { openaiExtractor } from "../masking/extractors/openai";
 import { restoreResponse } from "../masking/restorer";
@@ -120,12 +121,22 @@ openaiRoutes.post(
         },
       };
 
+      const detectionStartTime = Date.now();
       pipelineResult = await detectionPipeline.run(detectionReq);
+      const detectionLatencyMs = Date.now() - detectionStartTime;
 
       // Set security policy response headers
       c.header("X-PasteGuard-Policy-Action", pipelineResult.policyDecision.action);
       c.header("X-PasteGuard-Risk-Level", pipelineResult.riskAssessment.level);
       c.header("X-PasteGuard-Risk-Score", pipelineResult.riskAssessment.score.toFixed(1));
+
+      // M6A Security Audit Log (fire-and-forget, ordered before BLOCK 400 and before provider call)
+      logSecurityEvent(pipelineResult, {
+        requestId,
+        provider: selectedProvider,
+        model: request.model ?? "unknown",
+        latencyMs: detectionLatencyMs,
+      });
 
       // Enforce BLOCK action immediately (prevents any call to LLM providers)
       if (pipelineResult.policyDecision.action === "block") {

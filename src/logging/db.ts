@@ -39,8 +39,35 @@ export interface RequestLogsTable {
   created_at: ColumnType<string | null, string | undefined, never>;
 }
 
+/**
+ * Kysely table type for the `security_events` audit log table (M6A).
+ *
+ * Security invariant: `candidates` and `matched_rule_ids` are JSON-serialised
+ * arrays that NEVER contain raw secret/PII values — only CandidateSummary
+ * metadata (category, subtype, severity, confidence, detector id).
+ */
+export interface SecurityEventsTable {
+  id: Generated<number>;
+  event_id: string;
+  request_id: string;
+  timestamp: string;
+  source: string;
+  provider: string;
+  model: string;
+  risk_score: number;
+  risk_level: string;
+  action: string;
+  decision_reason: string;
+  candidates: string;           // JSON: CandidateSummary[]
+  detectors_triggered: string;  // JSON: string[]
+  matched_rule_ids: string;     // JSON: string[]
+  latency_ms: number;
+  created_at: ColumnType<string | null, string | undefined, never>;
+}
+
 export interface LogDatabase {
   request_logs: RequestLogsTable;
+  security_events: SecurityEventsTable;
 }
 
 interface MigrationDatabase extends LogDatabase {
@@ -119,6 +146,7 @@ export async function migrateLogDatabase(db: LogKysely, driver: LoggingDriver): 
     db,
     provider: new InlineMigrationProvider({
       "0001_request_logs": createRequestLogsMigration(driver),
+      "0002_security_events": createSecurityEventsMigration(driver),
     }),
   });
 
@@ -168,6 +196,39 @@ function createRequestLogsMigration(driver: LoggingDriver): Migration {
         .execute();
 
       await createRequestLogIndexes(db);
+    },
+  };
+}
+
+function createSecurityEventsMigration(driver: LoggingDriver): Migration {
+  return {
+    async up(db) {
+      let createTable = db.schema.createTable("security_events").ifNotExists();
+
+      createTable =
+        driver === "postgres"
+          ? createTable.addColumn("id", "serial", (column) => column.primaryKey())
+          : createTable.addColumn("id", "integer", (column) => column.primaryKey().autoIncrement());
+
+      await createTable
+        .addColumn("event_id", "text", (column) => column.notNull())
+        .addColumn("request_id", "text", (column) => column.notNull())
+        .addColumn("timestamp", "text", (column) => column.notNull())
+        .addColumn("source", "text", (column) => column.notNull().defaultTo("promptwall"))
+        .addColumn("provider", "text", (column) => column.notNull())
+        .addColumn("model", "text", (column) => column.notNull())
+        .addColumn("risk_score", "real", (column) => column.notNull())
+        .addColumn("risk_level", "text", (column) => column.notNull())
+        .addColumn("action", "text", (column) => column.notNull())
+        .addColumn("decision_reason", "text", (column) => column.notNull())
+        .addColumn("candidates", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("detectors_triggered", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("matched_rule_ids", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("latency_ms", "integer", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .execute();
+
+      await createSecurityEventIndexes(db);
     },
   };
 }
@@ -229,6 +290,27 @@ async function createRequestLogIndexes(db: LogKysely): Promise<void> {
     .ifNotExists()
     .on("request_logs")
     .column("pii_detected")
+    .execute();
+}
+
+async function createSecurityEventIndexes(db: LogKysely): Promise<void> {
+  await db.schema
+    .createIndex("idx_se_timestamp")
+    .ifNotExists()
+    .on("security_events")
+    .column("timestamp")
+    .execute();
+  await db.schema
+    .createIndex("idx_se_action")
+    .ifNotExists()
+    .on("security_events")
+    .column("action")
+    .execute();
+  await db.schema
+    .createIndex("idx_se_request_id")
+    .ifNotExists()
+    .on("security_events")
+    .column("request_id")
     .execute();
 }
 
