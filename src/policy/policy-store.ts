@@ -12,11 +12,17 @@
  * prompts are NEVER accepted or stored.
  */
 
-import type { CandidateCategory, PolicyAction, PolicyRule, RiskLevel, Severity } from "@promptwall/engine";
-import { getAuditLogger } from "../logging/audit-logger";
-import type { LogKysely, SecurityPoliciesTable } from "../logging/db";
-import { createLogDatabase, migrateLogDatabase } from "../logging/db";
+import type {
+  CandidateCategory,
+  PolicyAction,
+  PolicyRule,
+  RiskLevel,
+  Severity,
+} from "@promptwall/engine";
 import { getConfig } from "../config";
+import { getAuditLogger } from "../logging/audit-logger";
+import type { LogKysely } from "../logging/db";
+import { createLogDatabase, migrateLogDatabase } from "../logging/db";
 
 export interface PolicyConditions {
   riskLevel?: RiskLevel;
@@ -62,6 +68,28 @@ export interface StoredPolicy {
   updatedAt: string;
 }
 
+/**
+ * A single immutable snapshot of a policy's state at a given version number.
+ * Rows in `security_policy_versions` are never modified or deleted.
+ */
+export interface StoredPolicyVersion {
+  /** UUID row identifier for this version entry. */
+  id: string;
+  /** The policy this version belongs to. */
+  policyId: string;
+  /** 1-based, monotonically increasing per policyId. */
+  version: number;
+  name: string;
+  description: string | null;
+  priority: number;
+  enabled: boolean;
+  conditions: PolicyConditions;
+  action: PolicyAction;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
 let defaultDbInstance: LogKysely | null = null;
 let defaultDbReady: Promise<void> | null = null;
 
@@ -92,7 +120,7 @@ export class PolicyStore {
    * Emit an audit event for policy mutation.
    */
   private async auditMutation(
-    mutationType: "created" | "updated" | "deleted" | "status_toggled",
+    mutationType: "created" | "updated" | "deleted" | "status_toggled" | "rolled_back",
     policyId: string,
     actor: string,
   ): Promise<void> {
@@ -144,7 +172,14 @@ export class PolicyStore {
       .execute();
 
     await this.auditMutation("created", id, actor);
-    return this.getPolicy(id) as Promise<StoredPolicy>;
+
+    const created = await this.getPolicy(id);
+    if (!created) throw new Error(`[PolicyStore] Failed to read back created policy '${id}'`);
+
+    // Snapshot version 1 for the newly created policy
+    await this.snapshotVersion(created, actor);
+
+    return created;
   }
 
   async getPolicy(id: string): Promise<StoredPolicy | null> {
@@ -197,7 +232,11 @@ export class PolicyStore {
     }));
   }
 
-  async updatePolicy(id: string, input: UpdatePolicyInput, actor = "admin"): Promise<StoredPolicy | null> {
+  async updatePolicy(
+    id: string,
+    input: UpdatePolicyInput,
+    actor = "admin",
+  ): Promise<StoredPolicy | null> {
     await this.ready;
 
     const existing = await this.getPolicy(id);
@@ -224,14 +263,17 @@ export class PolicyStore {
     if (input.action !== undefined) updates.action = input.action;
     if (input.reason !== undefined) updates.reason = input.reason;
 
-    await this.db
-      .updateTable("security_policies")
-      .set(updates)
-      .where("id", "=", id)
-      .execute();
+    await this.db.updateTable("security_policies").set(updates).where("id", "=", id).execute();
 
     await this.auditMutation("updated", id, actor);
-    return this.getPolicy(id);
+
+    const updated = await this.getPolicy(id);
+    if (!updated) return null;
+
+    // Snapshot new version after the live row has been updated
+    await this.snapshotVersion(updated, actor);
+
+    return updated;
   }
 
   async deletePolicy(id: string, actor = "admin"): Promise<boolean> {
@@ -245,7 +287,11 @@ export class PolicyStore {
     return true;
   }
 
-  async togglePolicyStatus(id: string, enabled: boolean, actor = "admin"): Promise<StoredPolicy | null> {
+  async togglePolicyStatus(
+    id: string,
+    enabled: boolean,
+    actor = "admin",
+  ): Promise<StoredPolicy | null> {
     await this.ready;
 
     const existing = await this.getPolicy(id);
@@ -261,7 +307,14 @@ export class PolicyStore {
       .execute();
 
     await this.auditMutation("status_toggled", id, actor);
-    return this.getPolicy(id);
+
+    const toggled = await this.getPolicy(id);
+    if (!toggled) return null;
+
+    // Snapshot new version after toggle so enable/disable changes are versioned
+    await this.snapshotVersion(toggled, actor);
+
+    return toggled;
   }
 
   /**
@@ -293,5 +346,169 @@ export class PolicyStore {
         provider: cond.provider,
       };
     });
+  }
+
+  // ── Version history ───────────────────────────────────────────────────────
+
+  /**
+   * Insert a new immutable snapshot of `policy` into `security_policy_versions`.
+   *
+   * The version number is computed as: MAX(version) for this policy_id + 1,
+   * defaulting to 1 for brand-new policies.
+   *
+   * This method is called by every mutating operation (create, update, toggle,
+   * rollback) after the live `security_policies` row has been written.
+   */
+  private async snapshotVersion(policy: StoredPolicy, actor: string): Promise<void> {
+    // Determine next version number for this policy
+    const result = await this.db
+      .selectFrom("security_policy_versions")
+      .select((eb) => eb.fn.max("version").as("max_version"))
+      .where("policy_id", "=", policy.id)
+      .executeTakeFirst();
+
+    const nextVersion = result?.max_version != null ? Number(result.max_version) + 1 : 1;
+
+    await this.db
+      .insertInto("security_policy_versions")
+      .values({
+        id: crypto.randomUUID(),
+        policy_id: policy.id,
+        version: nextVersion,
+        name: policy.name,
+        description: policy.description,
+        priority: policy.priority,
+        enabled: policy.enabled ? 1 : 0,
+        conditions: JSON.stringify(policy.conditions),
+        action: policy.action,
+        reason: policy.reason,
+        created_by: actor,
+        created_at: new Date().toISOString(),
+      })
+      .execute();
+  }
+
+  /**
+   * Retrieve all version snapshots for a given policy, ordered by version ASC.
+   *
+   * History is preserved even after the policy row is deleted from
+   * `security_policies`, so this may return rows for deleted policies.
+   *
+   * @returns Empty array if no versions exist for the given policyId.
+   */
+  async getPolicyVersions(policyId: string): Promise<StoredPolicyVersion[]> {
+    await this.ready;
+
+    const rows = await this.db
+      .selectFrom("security_policy_versions")
+      .selectAll()
+      .where("policy_id", "=", policyId)
+      .orderBy("version", "asc")
+      .execute();
+
+    return rows.map((row) => ({
+      id: row.id,
+      policyId: row.policy_id,
+      version: Number(row.version),
+      name: row.name,
+      description: row.description,
+      priority: Number(row.priority),
+      enabled: Number(row.enabled) === 1,
+      conditions: JSON.parse(row.conditions) as PolicyConditions,
+      action: row.action as PolicyAction,
+      reason: row.reason,
+      createdBy: row.created_by,
+      createdAt: row.created_at ?? new Date().toISOString(),
+    }));
+  }
+
+  /**
+   * Retrieve a single version snapshot for a given policy.
+   *
+   * @returns `null` if the (policyId, version) pair does not exist.
+   */
+  async getPolicyVersion(policyId: string, version: number): Promise<StoredPolicyVersion | null> {
+    await this.ready;
+
+    const row = await this.db
+      .selectFrom("security_policy_versions")
+      .selectAll()
+      .where("policy_id", "=", policyId)
+      .where("version", "=", version)
+      .executeTakeFirst();
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      policyId: row.policy_id,
+      version: Number(row.version),
+      name: row.name,
+      description: row.description,
+      priority: Number(row.priority),
+      enabled: Number(row.enabled) === 1,
+      conditions: JSON.parse(row.conditions) as PolicyConditions,
+      action: row.action as PolicyAction,
+      reason: row.reason,
+      createdBy: row.created_by,
+      createdAt: row.created_at ?? new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Rollback a policy to a specific historical version.
+   *
+   * Rollback creates a NEW version snapshot copied from `targetVersion` and
+   * overwrites the live `security_policies` row with that state. History is
+   * never deleted or rewritten — the rollback itself is versioned.
+   *
+   * @param policyId     - ID of the policy to roll back.
+   * @param targetVersion - The version number to restore from.
+   * @param actor        - Authenticated user performing the rollback.
+   * @returns The restored `StoredPolicy` (reflecting the new live state),
+   *          or `null` if the policy or target version does not exist.
+   */
+  async rollbackPolicy(
+    policyId: string,
+    targetVersion: number,
+    actor = "admin",
+  ): Promise<StoredPolicy | null> {
+    await this.ready;
+
+    // Verify the policy exists
+    const existing = await this.getPolicy(policyId);
+    if (!existing) return null;
+
+    // Fetch the target version snapshot
+    const snapshot = await this.getPolicyVersion(policyId, targetVersion);
+    if (!snapshot) return null;
+
+    const now = new Date().toISOString();
+
+    // Overwrite the live policy row with the snapshot state
+    await this.db
+      .updateTable("security_policies")
+      .set({
+        name: snapshot.name,
+        description: snapshot.description,
+        priority: snapshot.priority,
+        enabled: snapshot.enabled ? 1 : 0,
+        conditions: JSON.stringify(snapshot.conditions),
+        action: snapshot.action,
+        reason: snapshot.reason,
+        updated_at: now,
+      })
+      .where("id", "=", policyId)
+      .execute();
+
+    await this.auditMutation("rolled_back", policyId, actor);
+
+    const restored = await this.getPolicy(policyId);
+    if (!restored) return null;
+
+    // Append a new version entry so the rollback itself is in the history
+    await this.snapshotVersion(restored, actor);
+
+    return restored;
   }
 }

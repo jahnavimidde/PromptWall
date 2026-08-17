@@ -58,9 +58,9 @@ export interface SecurityEventsTable {
   risk_level: string;
   action: string;
   decision_reason: string;
-  candidates: string;           // JSON: CandidateSummary[]
-  detectors_triggered: string;  // JSON: string[]
-  matched_rule_ids: string;     // JSON: string[]
+  candidates: string; // JSON: CandidateSummary[]
+  detectors_triggered: string; // JSON: string[]
+  matched_rule_ids: string; // JSON: string[]
   latency_ms: number;
   created_at: ColumnType<string | null, string | undefined, never>;
 }
@@ -70,20 +70,41 @@ export interface SecurityPoliciesTable {
   name: string;
   description: string | null;
   priority: number;
-  enabled: number;               // 1 = active, 0 = disabled
-  conditions: string;            // JSON: { riskLevel, minRiskScore, category, subtype, detector, provider, severity }
-  action: string;                // "allow" | "mask" | "block"
+  enabled: number; // 1 = active, 0 = disabled
+  conditions: string; // JSON: { riskLevel, minRiskScore, category, subtype, detector, provider, severity }
+  action: string; // "allow" | "mask" | "block"
   reason: string | null;
   created_by: string;
   created_at: ColumnType<string | null, string | undefined, never>;
   updated_at: ColumnType<string | null, string | undefined, string | undefined>;
 }
 
+/**
+ * Kysely table type for the `security_policy_versions` immutable version history table (M8B).
+ *
+ * Every policy mutation (create / update / toggle / rollback) appends a row here.
+ * Rows are never deleted — this is the permanent audit trail of every policy state.
+ */
+export interface SecurityPolicyVersionsTable {
+  id: string; // UUID for this version row
+  policy_id: string; // FK → security_policies.id (logical reference only)
+  version: number; // 1-based, monotonically increasing per policy_id
+  name: string;
+  description: string | null;
+  priority: number;
+  enabled: number; // 1 = active, 0 = disabled
+  conditions: string; // JSON: PolicyConditions
+  action: string; // "allow" | "mask" | "block"
+  reason: string | null;
+  created_by: string;
+  created_at: ColumnType<string | null, string | undefined, never>;
+}
+
 export interface UsersTable {
   id: string;
   email: string;
   password_hash: string;
-  role: string;                  // "ADMIN" | "SECURITY_ANALYST" | "VIEWER"
+  role: string; // "ADMIN" | "SECURITY_ANALYST" | "VIEWER"
   created_at: ColumnType<string | null, string | undefined, never>;
   updated_at: ColumnType<string | null, string | undefined, never>;
 }
@@ -92,6 +113,7 @@ export interface LogDatabase {
   request_logs: RequestLogsTable;
   security_events: SecurityEventsTable;
   security_policies: SecurityPoliciesTable;
+  security_policy_versions: SecurityPolicyVersionsTable;
   users: UsersTable;
 }
 
@@ -174,6 +196,7 @@ export async function migrateLogDatabase(db: LogKysely, driver: LoggingDriver): 
       "0002_security_events": createSecurityEventsMigration(driver),
       "0003_security_policies": createSecurityPoliciesMigration(driver),
       "0004_users": createUsersMigration(driver),
+      "0005_policy_versions": createPolicyVersionsMigration(driver),
     }),
   });
 
@@ -260,7 +283,7 @@ function createSecurityEventsMigration(driver: LoggingDriver): Migration {
   };
 }
 
-function createSecurityPoliciesMigration(driver: LoggingDriver): Migration {
+function createSecurityPoliciesMigration(_driver: LoggingDriver): Migration {
   return {
     async up(db) {
       const createTable = db.schema.createTable("security_policies").ifNotExists();
@@ -289,7 +312,47 @@ function createSecurityPoliciesMigration(driver: LoggingDriver): Migration {
   };
 }
 
-function createUsersMigration(driver: LoggingDriver): Migration {
+function createPolicyVersionsMigration(_driver: LoggingDriver): Migration {
+  return {
+    async up(db) {
+      await db.schema
+        .createTable("security_policy_versions")
+        .ifNotExists()
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("policy_id", "text", (column) => column.notNull())
+        .addColumn("version", "integer", (column) => column.notNull())
+        .addColumn("name", "text", (column) => column.notNull())
+        .addColumn("description", "text")
+        .addColumn("priority", "integer", (column) => column.notNull())
+        .addColumn("enabled", "integer", (column) => column.notNull())
+        .addColumn("conditions", "text", (column) => column.notNull())
+        .addColumn("action", "text", (column) => column.notNull())
+        .addColumn("reason", "text")
+        .addColumn("created_by", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.defaultTo(sql`CURRENT_TIMESTAMP`))
+        .execute();
+
+      // Unique constraint: one row per (policy_id, version) pair
+      await db.schema
+        .createIndex("idx_spv_policy_version")
+        .ifNotExists()
+        .unique()
+        .on("security_policy_versions")
+        .columns(["policy_id", "version"])
+        .execute();
+
+      // Fast lookup of all versions for a given policy
+      await db.schema
+        .createIndex("idx_policy_versions_policy")
+        .ifNotExists()
+        .on("security_policy_versions")
+        .column("policy_id")
+        .execute();
+    },
+  };
+}
+
+function createUsersMigration(_driver: LoggingDriver): Migration {
   return {
     async up(db) {
       const createTable = db.schema.createTable("users").ifNotExists();

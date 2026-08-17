@@ -10,8 +10,9 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { authMiddleware, requireRole } from "../auth/middleware";
 import type { JwtUserPayload } from "../auth/jwt";
+import { authMiddleware, requireRole } from "../auth/middleware";
+import type { StoredPolicyVersion } from "../policy/policy-store";
 import { PolicyStore } from "../policy/policy-store";
 import { invalidatePolicyCache } from "../policy/runtime";
 
@@ -179,4 +180,122 @@ policyRoutes.patch("/:id/status", zValidator("json", PolicyStatusSchema), async 
 
   invalidatePolicyCache();
   return c.json({ policy });
+});
+
+// ── Versioning Routes (M8B) ─────────────────────────────────────────────────
+
+const RollbackSchema = z.object({
+  version: z.number().int().positive("Version must be a positive integer"),
+});
+
+/**
+ * GET /api/policies/:id/versions - List all immutable version snapshots for a policy
+ */
+policyRoutes.get("/:id/versions", async (c) => {
+  const id = c.req.param("id");
+  const store = new PolicyStore();
+
+  // Ensure the policy itself exists (history may exist even after deletion)
+  const policy = await store.getPolicy(id);
+  if (!policy) {
+    return c.json(
+      {
+        error: {
+          message: `Policy '${id}' not found`,
+          type: "not_found",
+        },
+      },
+      404,
+    );
+  }
+
+  const versions: StoredPolicyVersion[] = await store.getPolicyVersions(id);
+  return c.json({ policyId: id, versions });
+});
+
+/**
+ * GET /api/policies/:id/versions/:version - Get a single version snapshot
+ */
+policyRoutes.get("/:id/versions/:version", async (c) => {
+  const id = c.req.param("id");
+  const versionParam = Number(c.req.param("version"));
+
+  if (!Number.isInteger(versionParam) || versionParam < 1) {
+    return c.json(
+      {
+        error: {
+          message: "Version must be a positive integer",
+          type: "validation_error",
+        },
+      },
+      400,
+    );
+  }
+
+  const store = new PolicyStore();
+  const version: StoredPolicyVersion | null = await store.getPolicyVersion(id, versionParam);
+
+  if (!version) {
+    return c.json(
+      {
+        error: {
+          message: `Version ${versionParam} of policy '${id}' not found`,
+          type: "not_found",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ version });
+});
+
+/**
+ * POST /api/policies/:id/rollback - Roll back a policy to a specific historical version
+ *
+ * Rollback creates a NEW version snapshot copied from the target version, then
+ * overwrites the live policy row. History is never deleted or rewritten.
+ *
+ * Body: { "version": <positive integer> }
+ * Response: { policy, version } — the restored live state and its new version number.
+ */
+policyRoutes.post("/:id/rollback", zValidator("json", RollbackSchema), async (c) => {
+  const id = c.req.param("id");
+  const { version: targetVersion } = c.req.valid("json");
+  const user = c.get("user") as JwtUserPayload;
+  const store = new PolicyStore();
+
+  const restored = await store.rollbackPolicy(id, targetVersion, user.email);
+
+  if (!restored) {
+    // Policy doesn't exist or target version doesn't exist
+    const policy = await store.getPolicy(id);
+    if (!policy) {
+      return c.json(
+        {
+          error: {
+            message: `Policy '${id}' not found`,
+            type: "not_found",
+          },
+        },
+        404,
+      );
+    }
+    return c.json(
+      {
+        error: {
+          message: `Version ${targetVersion} of policy '${id}' not found`,
+          type: "not_found",
+        },
+      },
+      404,
+    );
+  }
+
+  // Retrieve the newly created version number (the rollback snapshot)
+  const versions = await store.getPolicyVersions(id);
+  const newVersion = versions.at(-1)?.version ?? null;
+
+  invalidatePolicyCache();
+  return c.json({ policy: restored, rolledBackFrom: targetVersion, version: newVersion });
 });
