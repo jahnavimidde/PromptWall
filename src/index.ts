@@ -20,6 +20,7 @@ import { infoRoutes } from "./routes/info";
 import { landingRoutes } from "./routes/landing";
 import { openaiRoutes } from "./routes/openai";
 import { policyRoutes } from "./routes/policies";
+import { simulatorRoutes } from "./routes/policy-simulator";
 
 type Variables = {
   requestId: string;
@@ -61,6 +62,7 @@ app.route("/api", apiRoutes);
 app.route("/api/audit", auditRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api/policies", policyRoutes);
+app.route("/api/policies", simulatorRoutes);
 
 if (config.dashboard.enabled) {
   app.route("/dashboard", dashboardRoutes);
