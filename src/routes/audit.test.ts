@@ -6,13 +6,17 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { Hono } from "hono";
 import { buildSecurityEvent, type Candidate, type PipelineResult } from "@promptwall/engine";
-import { SqliteAuditLogger } from "../logging/audit-logger";
+import { Hono } from "hono";
 import { signUserToken } from "../auth/jwt";
+import { SqliteAuditLogger } from "../logging/audit-logger";
 import { auditRoutes } from "./audit";
 
-function makeCandidate(subtype: string, category: "secret" | "pii" | "malicious" = "secret", detector = "test-detector"): Candidate {
+function makeCandidate(
+  subtype: string,
+  category: "secret" | "pii" | "malicious" = "secret",
+  detector = "test-detector",
+): Candidate {
   return {
     id: crypto.randomUUID(),
     category,
@@ -28,8 +32,13 @@ function makeCandidate(subtype: string, category: "secret" | "pii" | "malicious"
   };
 }
 
-function makePipelineResult(action: "allow" | "mask" | "block", riskScore: number, candidates: Candidate[] = []): PipelineResult {
-  const level = riskScore >= 80 ? "critical" : riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
+function makePipelineResult(
+  action: "allow" | "mask" | "block",
+  riskScore: number,
+  candidates: Candidate[] = [],
+): PipelineResult {
+  const level =
+    riskScore >= 80 ? "critical" : riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
   return {
     candidates,
     detectionResult: {
@@ -76,7 +85,10 @@ describe("M6B — Audit REST API Routes (/api/audit/*)", () => {
     const res = await app.request("/api/audit/events?action=block&limit=10");
     expect(res.status).toBe(200);
 
-    const body = (await res.json()) as { events: Array<{ requestId: string }>; pagination: { total: number } };
+    const body = (await res.json()) as {
+      events: Array<{ requestId: string }>;
+      pagination: { total: number };
+    };
     expect(body.events).toBeDefined();
     expect(body.events.length).toBeGreaterThanOrEqual(1);
     expect(body.pagination.total).toBeGreaterThanOrEqual(1);

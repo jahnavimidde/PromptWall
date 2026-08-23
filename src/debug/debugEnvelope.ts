@@ -1,6 +1,13 @@
 import type { Context } from "hono";
 import type { PrivacyPipelineResult } from "../privacy/pipeline";
-import { DEMO_HEADER, DEMO_SECRET_HEADER, type DebugEnvelope, type DebugInfo, type DebugTimings, type PolicyDecision } from "./types";
+import {
+  DEMO_HEADER,
+  DEMO_SECRET_HEADER,
+  type DebugEnvelope,
+  type DebugInfo,
+  type DebugTimings,
+  type PolicyDecision,
+} from "./types";
 
 /**
  * Checks if demo mode is active and authorized for the current request.
@@ -12,7 +19,8 @@ export function isDemoEnabled(c: Context): boolean {
 
   // Allow localhost dev experience by default
   const host = c.req.header("host") || "";
-  const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("[::1]");
+  const isLocalhost =
+    host.includes("localhost") || host.includes("127.0.0.1") || host.includes("[::1]");
   if (isLocalhost) return true;
 
   // If a demo secret is configured, require it
@@ -30,7 +38,6 @@ export function isDemoEnabled(c: Context): boolean {
   // Default: disabled in production mode, enabled in dev
   return process.env.NODE_ENV !== "production";
 }
-
 
 // ─── Input types ─────────────────────────────────────────────────────────────
 
@@ -175,8 +182,7 @@ function buildTimings(input: {
   const end = input.afterRestoreTime > 0 ? input.afterRestoreTime : now;
 
   return {
-    secretsMs:
-      input.afterSecretsTime > 0 ? input.afterSecretsTime - input.startTime : 0,
+    secretsMs: input.afterSecretsTime > 0 ? input.afterSecretsTime - input.startTime : 0,
     piiMs:
       input.afterPIITime > 0 && input.afterSecretsTime > 0
         ? input.afterPIITime - input.afterSecretsTime

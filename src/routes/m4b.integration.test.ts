@@ -20,16 +20,16 @@
  * the rest of the suite continues to pass.
  */
 
-import { describe, expect, test, afterEach, mock } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 // Import the native Bun fetch directly — this is immune to globalThis.fetch
 // pollution from other test files running in the same bun process.
 import { fetch as nativeFetch } from "bun";
 import { Hono } from "hono";
 import {
-  PIIDetector,
   filterAllowlistedEntities,
   findDenylistedEntities,
   mergeDenylistEntities,
+  PIIDetector,
 } from "../pii/detect";
 
 // Restore real PIIDetector for getPIIDetector() in case previous test files mocked ../pii/detect
@@ -54,15 +54,9 @@ app.route("/openai", openaiRoutes);
 /** True provider-domain URLs that the mock intercepts. */
 function isProviderUrl(input: string | URL | Request): boolean {
   const url =
-    typeof input === "string"
-      ? input
-      : input instanceof Request
-        ? input.url
-        : String(input);
+    typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
   return (
-    url.includes("openai.com") ||
-    url.includes("googleapis.com") ||
-    url.includes("anthropic.com")
+    url.includes("openai.com") || url.includes("googleapis.com") || url.includes("anthropic.com")
   );
 }
 
@@ -96,9 +90,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
     }
 
     if (!detectorHealthy) {
-      console.warn(
-        "[M4B-1] SKIP — GLiNER detector not reachable at http://localhost:5002",
-      );
+      console.warn("[M4B-1] SKIP — GLiNER detector not reachable at http://localhost:5002");
       return; // Graceful skip — detector unavailable in CI
     }
 
@@ -110,11 +102,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input);
+        typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
 
       // Forward detector calls to the real service
       if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
@@ -195,11 +183,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input);
+        typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
       if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
         return nativeFetch(input, init);
       }
@@ -213,9 +197,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       body: JSON.stringify({
         provider: "openai",
         model: "gpt-4o",
-        messages: [
-          { role: "user", content: `Please deploy using key: ${syntheticKey}` },
-        ],
+        messages: [{ role: "user", content: `Please deploy using key: ${syntheticKey}` }],
       }),
     });
 
@@ -239,11 +221,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input);
+        typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
       if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
         return nativeFetch(input, init);
       }
@@ -286,11 +264,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input);
+        typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
       if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
         return nativeFetch(input, init);
       }
@@ -351,11 +325,7 @@ describe("M4B — Engine-Privacy Pipeline Integration Hardening", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input);
+        typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
       if (url.includes("localhost:5002") || url.includes("localhost:7080")) {
         return nativeFetch(input, init);
       }

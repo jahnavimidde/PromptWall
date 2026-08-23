@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark-dark.svg">
@@ -425,4 +424,3 @@ Future contributor documentation will include:
 # ⭐ Vision
 
 PromptWall aims to become a comprehensive security layer for AI applications by combining deterministic detection, machine learning, policy enforcement, and enterprise observability into a unified platform for protecting sensitive information in LLM workflows.
->>>>>>> 3c81a5dcef40b72fcbdf474549b4dc806cab0264

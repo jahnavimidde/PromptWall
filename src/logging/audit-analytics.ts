@@ -7,9 +7,9 @@
  * threat subtype counts, latency percentiles (P50, P95, Avg), and time-series rollups.
  */
 
-import { getConfig } from "../config";
-import { createLogDatabase, migrateLogDatabase, type LogKysely } from "./db";
 import type { CandidateSummary } from "@promptwall/engine";
+import { getConfig } from "../config";
+import { createLogDatabase, type LogKysely, migrateLogDatabase } from "./db";
 
 export interface ActionBreakdown {
   allow: number;
@@ -186,7 +186,7 @@ export async function getSecurityAnalytics(
     const bucketKey =
       timeframe === "7d" || timeframe === "30d" || timeframe === "all"
         ? dateObj.toISOString().slice(0, 10) // YYYY-MM-DD
-        : dateObj.toISOString().slice(0, 13) + ":00:00.000Z"; // YYYY-MM-DDTHH:00:00.000Z
+        : `${dateObj.toISOString().slice(0, 13)}:00:00.000Z`; // YYYY-MM-DDTHH:00:00.000Z
 
     let bucket = timeSeriesBuckets.get(bucketKey);
     if (!bucket) {
@@ -257,9 +257,8 @@ export async function getSecurityAnalytics(
     .map(([bucketKey, b]) => {
       const avgScore =
         b.riskScores.length > 0
-          ? Math.round(
-              (b.riskScores.reduce((acc, s) => acc + s, 0) / b.riskScores.length) * 10,
-            ) / 10
+          ? Math.round((b.riskScores.reduce((acc, s) => acc + s, 0) / b.riskScores.length) * 10) /
+            10
           : 0;
 
       return {

@@ -42,6 +42,8 @@ export interface CreatePolicyInput {
   conditions: PolicyConditions;
   action: PolicyAction;
   reason?: string;
+  /** M12: org that owns this policy. Omit for global (system-level) policies. */
+  organizationId?: string;
 }
 
 export interface UpdatePolicyInput {
@@ -66,6 +68,8 @@ export interface StoredPolicy {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** M12: owning org. null or "org_system" = global/system policy. */
+  organizationId: string | null;
 }
 
 /**
@@ -166,6 +170,7 @@ export class PolicyStore {
         action: input.action,
         reason: input.reason ?? null,
         created_by: actor,
+        organization_id: input.organizationId ?? null,
         created_at: now,
         updated_at: now,
       })
@@ -203,6 +208,7 @@ export class PolicyStore {
       action: row.action as PolicyAction,
       reason: row.reason,
       createdBy: row.created_by,
+      organizationId: row.organization_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
     };
@@ -227,6 +233,49 @@ export class PolicyStore {
       action: row.action as PolicyAction,
       reason: row.reason,
       createdBy: row.created_by,
+      organizationId: row.organization_id ?? null,
+      createdAt: row.created_at ?? new Date().toISOString(),
+      updatedAt: row.updated_at ?? new Date().toISOString(),
+    }));
+  }
+
+  /**
+   * M12: List policies visible to a specific organization.
+   *
+   * Returns the org's own policies UNION the global (org_system / null) policies,
+   * ordered by priority ascending. Org-specific policies take precedence when
+   * the caller evaluates in priority order.
+   *
+   * The existing DetectionPipeline continues to use listPolicies() which returns
+   * ALL policies — this method is for org-scoped management API endpoints only.
+   */
+  async listPoliciesForOrg(orgId: string): Promise<StoredPolicy[]> {
+    await this.ready;
+
+    const rows = await this.db
+      .selectFrom("security_policies")
+      .selectAll()
+      .where((eb) =>
+        eb.or([
+          eb("organization_id", "=", orgId),
+          eb("organization_id", "is", null),
+          eb("organization_id", "=", "org_system"),
+        ]),
+      )
+      .orderBy("priority", "asc")
+      .execute();
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      priority: Number(row.priority),
+      enabled: Number(row.enabled) === 1,
+      conditions: JSON.parse(row.conditions) as PolicyConditions,
+      action: row.action as PolicyAction,
+      reason: row.reason,
+      createdBy: row.created_by,
+      organizationId: row.organization_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
     }));

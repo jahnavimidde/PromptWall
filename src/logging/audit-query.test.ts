@@ -5,16 +5,16 @@
  * M6B Unit Tests for Audit Query & Analytics Engines.
  */
 
-import { describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Kysely, SqliteDialect, type SqliteDatabase, type SqliteStatement } from "kysely";
-import { buildSecurityEvent, type PipelineResult, type Candidate } from "@promptwall/engine";
-import type { LogDatabase } from "./db";
-import { migrateLogDatabase } from "./db";
-import { SqliteAuditLogger } from "./audit-logger";
-import { querySecurityEvents, getSecurityEventById } from "./audit-query";
+import { describe, expect, test } from "bun:test";
+import { buildSecurityEvent, type Candidate, type PipelineResult } from "@promptwall/engine";
+import { Kysely, type SqliteDatabase, SqliteDialect, type SqliteStatement } from "kysely";
 import { getSecurityAnalytics } from "./audit-analytics";
 import { exportSecurityEventsAsCSV, exportSecurityEventsAsJSON } from "./audit-export";
+import { SqliteAuditLogger } from "./audit-logger";
+import { getSecurityEventById, querySecurityEvents } from "./audit-query";
+import type { LogDatabase } from "./db";
+import { migrateLogDatabase } from "./db";
 
 class BunSqliteDatabase implements SqliteDatabase {
   constructor(private readonly db: Database) {}
@@ -49,7 +49,11 @@ async function createInMemoryDb(): Promise<Kysely<LogDatabase>> {
   return db;
 }
 
-function makeCandidate(subtype: string, category: "secret" | "pii" | "malicious" = "secret", detector = "test-detector"): Candidate {
+function makeCandidate(
+  subtype: string,
+  category: "secret" | "pii" | "malicious" = "secret",
+  detector = "test-detector",
+): Candidate {
   return {
     id: crypto.randomUUID(),
     category,
@@ -65,8 +69,13 @@ function makeCandidate(subtype: string, category: "secret" | "pii" | "malicious"
   };
 }
 
-function makePipelineResult(action: "allow" | "mask" | "block", riskScore: number, candidates: Candidate[] = []): PipelineResult {
-  const level = riskScore >= 80 ? "critical" : riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
+function makePipelineResult(
+  action: "allow" | "mask" | "block",
+  riskScore: number,
+  candidates: Candidate[] = [],
+): PipelineResult {
+  const level =
+    riskScore >= 80 ? "critical" : riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
   return {
     candidates,
     detectionResult: {
@@ -101,24 +110,30 @@ describe("M6B — Audit Query Engine", () => {
     const db = await createInMemoryDb();
     const logger = new SqliteAuditLogger({ db });
 
-    const ev1 = buildSecurityEvent(makePipelineResult("block", 90, [makeCandidate("AWS_KEY", "secret", "secret-regex")]), {
-      requestId: "req-1",
-      provider: "openai",
-      model: "gpt-4o",
-      latencyMs: 10,
-    });
+    const ev1 = buildSecurityEvent(
+      makePipelineResult("block", 90, [makeCandidate("AWS_KEY", "secret", "secret-regex")]),
+      {
+        requestId: "req-1",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 10,
+      },
+    );
     const ev2 = buildSecurityEvent(makePipelineResult("allow", 10, []), {
       requestId: "req-2",
       provider: "gemini",
       model: "gemini-2.0-flash",
       latencyMs: 20,
     });
-    const ev3 = buildSecurityEvent(makePipelineResult("mask", 65, [makeCandidate("EMAIL", "pii", "pii-gliner")]), {
-      requestId: "req-3",
-      provider: "anthropic",
-      model: "claude-3-5",
-      latencyMs: 30,
-    });
+    const ev3 = buildSecurityEvent(
+      makePipelineResult("mask", 65, [makeCandidate("EMAIL", "pii", "pii-gliner")]),
+      {
+        requestId: "req-3",
+        provider: "anthropic",
+        model: "claude-3-5",
+        latencyMs: 30,
+      },
+    );
 
     await logger.log(ev1);
     await logger.log(ev2);
@@ -162,24 +177,33 @@ describe("M6B — Audit Query Engine", () => {
     const logger = new SqliteAuditLogger({ db });
 
     for (let i = 1; i <= 5; i++) {
-      const ev = buildSecurityEvent(makePipelineResult(i % 2 === 0 ? "block" : "allow", i * 15, []), {
-        requestId: `req-sort-${i}`,
-        provider: "openai",
-        model: "gpt-4",
-        latencyMs: i * 10,
-      });
+      const ev = buildSecurityEvent(
+        makePipelineResult(i % 2 === 0 ? "block" : "allow", i * 15, []),
+        {
+          requestId: `req-sort-${i}`,
+          provider: "openai",
+          model: "gpt-4",
+          latencyMs: i * 10,
+        },
+      );
       await logger.log(ev);
     }
 
     // Sort by latencyMs asc
-    const ascLatency = await querySecurityEvents({ sortBy: "latencyMs", sortOrder: "asc", limit: 2, offset: 0 }, db);
+    const ascLatency = await querySecurityEvents(
+      { sortBy: "latencyMs", sortOrder: "asc", limit: 2, offset: 0 },
+      db,
+    );
     expect(ascLatency.events).toHaveLength(2);
     expect(ascLatency.total).toBe(5);
     expect(ascLatency.events[0].latencyMs).toBe(10);
     expect(ascLatency.events[1].latencyMs).toBe(20);
 
     // Sort by riskScore desc
-    const descRisk = await querySecurityEvents({ sortBy: "riskScore", sortOrder: "desc", limit: 2, offset: 0 }, db);
+    const descRisk = await querySecurityEvents(
+      { sortBy: "riskScore", sortOrder: "desc", limit: 2, offset: 0 },
+      db,
+    );
     expect(descRisk.events[0].riskScore).toBe(75);
     expect(descRisk.events[1].riskScore).toBe(60);
 
@@ -190,12 +214,15 @@ describe("M6B — Audit Query Engine", () => {
     const db = await createInMemoryDb();
     const logger = new SqliteAuditLogger({ db });
 
-    const ev = buildSecurityEvent(makePipelineResult("block", 85, [makeCandidate("CREDIT_CARD", "pii")]), {
-      requestId: "req-single",
-      provider: "openai",
-      model: "gpt-4o",
-      latencyMs: 15,
-    });
+    const ev = buildSecurityEvent(
+      makePipelineResult("block", 85, [makeCandidate("CREDIT_CARD", "pii")]),
+      {
+        requestId: "req-single",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 15,
+      },
+    );
     await logger.log(ev);
 
     const fetched = await getSecurityEventById(ev.eventId, db);
@@ -215,9 +242,26 @@ describe("M6B — Analytics & Export Engine", () => {
     const db = await createInMemoryDb();
     const logger = new SqliteAuditLogger({ db });
 
-    await logger.log(buildSecurityEvent(makePipelineResult("block", 90, [makeCandidate("AWS_KEY", "secret", "secret-regex")]), { requestId: "1", provider: "openai", model: "m", latencyMs: 10 }));
-    await logger.log(buildSecurityEvent(makePipelineResult("mask", 60, [makeCandidate("EMAIL", "pii", "pii-gliner")]), { requestId: "2", provider: "openai", model: "m", latencyMs: 20 }));
-    await logger.log(buildSecurityEvent(makePipelineResult("allow", 10, []), { requestId: "3", provider: "openai", model: "m", latencyMs: 30 }));
+    await logger.log(
+      buildSecurityEvent(
+        makePipelineResult("block", 90, [makeCandidate("AWS_KEY", "secret", "secret-regex")]),
+        { requestId: "1", provider: "openai", model: "m", latencyMs: 10 },
+      ),
+    );
+    await logger.log(
+      buildSecurityEvent(
+        makePipelineResult("mask", 60, [makeCandidate("EMAIL", "pii", "pii-gliner")]),
+        { requestId: "2", provider: "openai", model: "m", latencyMs: 20 },
+      ),
+    );
+    await logger.log(
+      buildSecurityEvent(makePipelineResult("allow", 10, []), {
+        requestId: "3",
+        provider: "openai",
+        model: "m",
+        latencyMs: 30,
+      }),
+    );
 
     const analytics = await getSecurityAnalytics("all", db);
 
@@ -245,12 +289,15 @@ describe("M6B — Analytics & Export Engine", () => {
     const logger = new SqliteAuditLogger({ db });
 
     const rawSecret = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
-    const ev = buildSecurityEvent(makePipelineResult("block", 95, [makeCandidate("AWS_KEY", "secret", "secret-regex")]), {
-      requestId: "req-exp",
-      provider: "openai",
-      model: "gpt-4",
-      latencyMs: 12,
-    });
+    const ev = buildSecurityEvent(
+      makePipelineResult("block", 95, [makeCandidate("AWS_KEY", "secret", "secret-regex")]),
+      {
+        requestId: "req-exp",
+        provider: "openai",
+        model: "gpt-4",
+        latencyMs: 12,
+      },
+    );
     await logger.log(ev);
 
     const queryResult = await querySecurityEvents({}, db);

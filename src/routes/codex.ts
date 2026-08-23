@@ -21,7 +21,7 @@ import {
 import { createResponsesUnmaskingStream } from "../protocols/responses/stream-transformer";
 import { codexAdapter } from "../providers/codex/adapter";
 import "../providers/codex/provider";
-import { providerRegistry } from "../providers/registry";
+import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { LLMRequest, LLMResponse } from "../providers/types";
 import type { SecretsProcessResult } from "../secrets/request";
 import {
@@ -258,8 +258,10 @@ async function sendToCodex(c: Context, originalRequest: CodexResponsesRequest, o
       throw new Error("Codex provider not registered");
     }
 
-    const result = await provider.complete(request as LLMRequest, {
+    const result = await resilientProvider.complete(request as LLMRequest, {
       headers,
+      provider: "codex",
+      allowFailover: false,
     });
 
     if (result.isStreaming) {

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { getConfig } from "../config";
-import { filterAllowlistedEntities, type PIIDetectionResult, PIIDetector } from "../pii/detect";
 import { DEMO_HEADER, DEMO_SECRET_HEADER } from "../debug/types";
+import { filterAllowlistedEntities, type PIIDetectionResult, PIIDetector } from "../pii/detect";
 
 const mockAnalyzeRequest = mock<() => Promise<PIIDetectionResult>>(() =>
   Promise.resolve({
@@ -68,7 +68,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 
@@ -98,7 +104,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 
@@ -207,7 +219,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 

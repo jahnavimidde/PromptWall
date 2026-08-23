@@ -113,6 +113,11 @@ const DashboardPage: FC = () => {
 						<AuditFilterBar />
 						<AuditEventsSection />
 					</div>
+
+					<div id="operations-tab-content" class="hidden">
+						<OperationsStatsGrid />
+						<OperationsDetailSection />
+					</div>
 				</div>
 				<ClientScript />
 			</body>
@@ -163,6 +168,13 @@ const NavigationTabs: FC = () => (
 			onclick="switchTab('audit')"
 		>
 			🛡️ Security Audit & Risk Logs
+		</button>
+		<button
+			id="tab-operations"
+			class="py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer"
+			onclick="switchTab('operations')"
+		>
+			⚡ Operations & Telemetry
 		</button>
 	</div>
 );
@@ -320,6 +332,38 @@ const AuditEventsSection: FC = () => (
 	</div>
 );
 
+const OperationsStatsGrid: FC = () => (
+	<div id="ops-stats-grid" class="grid grid-cols-5 gap-4 mb-8">
+		<StatCard label="Requests / Min" valueId="ops-requests-min" accent="teal" />
+		<StatCard label="Security Block Rate" valueId="ops-block-rate" accent="accent" />
+		<StatCard label="Provider Health" valueId="ops-provider-uptime" accent="success" />
+		<StatCard label="Avg Latency" valueId="ops-avg-latency" />
+		<StatCard label="Failovers Total" valueId="ops-failover-count" accent="info" />
+	</div>
+);
+
+const OperationsDetailSection: FC = () => (
+	<div class="grid grid-cols-2 gap-6 mb-8">
+		<div class="bg-surface border border-border-subtle rounded-xl p-6 shadow-sm animate-fade-in">
+			<div class="text-[0.8rem] font-semibold text-text-secondary mb-4 uppercase tracking-wide">
+				Provider Reliability & Latency
+			</div>
+			<div id="ops-providers-list" class="flex flex-col gap-3">
+				<div class="text-sm text-text-muted py-4 text-center">Loading provider metrics...</div>
+			</div>
+		</div>
+
+		<div class="bg-surface border border-border-subtle rounded-xl p-6 shadow-sm animate-fade-in">
+			<div class="text-[0.8rem] font-semibold text-text-secondary mb-4 uppercase tracking-wide">
+				Top Blocked Threats
+			</div>
+			<div id="ops-threats-list" class="flex flex-col gap-2.5">
+				<div class="text-sm text-text-muted py-4 text-center">Loading threat analytics...</div>
+			</div>
+		</div>
+	</div>
+);
+
 const ClientScript: FC = () => (
 	<script
 		// biome-ignore lint/security/noDangerouslySetInnerHtml: Client-side JS
@@ -328,21 +372,91 @@ const ClientScript: FC = () => (
 function switchTab(tab) {
   const overviewContent = document.getElementById('overview-tab-content');
   const auditContent = document.getElementById('audit-tab-content');
+  const opsContent = document.getElementById('operations-tab-content');
   const tabOverview = document.getElementById('tab-overview');
   const tabAudit = document.getElementById('tab-audit');
+  const tabOps = document.getElementById('tab-operations');
+
+  overviewContent.classList.add('hidden');
+  auditContent.classList.add('hidden');
+  opsContent.classList.add('hidden');
+  tabOverview.className = 'py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer';
+  tabAudit.className = 'py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer';
+  tabOps.className = 'py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer';
 
   if (tab === 'overview') {
     overviewContent.classList.remove('hidden');
-    auditContent.classList.add('hidden');
     tabOverview.className = 'py-3 font-medium text-accent tab-active cursor-pointer';
-    tabAudit.className = 'py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer';
-  } else {
-    overviewContent.classList.add('hidden');
+  } else if (tab === 'audit') {
     auditContent.classList.remove('hidden');
     tabAudit.className = 'py-3 font-medium text-accent tab-active cursor-pointer';
-    tabOverview.className = 'py-3 font-medium text-text-muted hover:text-text-primary cursor-pointer';
     fetchAuditAnalytics();
     fetchAuditEvents();
+  } else if (tab === 'operations') {
+    opsContent.classList.remove('hidden');
+    tabOps.className = 'py-3 font-medium text-accent tab-active cursor-pointer';
+    fetchOperationsStats();
+  }
+}
+
+async function fetchOperationsStats() {
+  try {
+    const [auditRes, healthRes] = await Promise.all([
+      fetch('/api/audit/dashboard'),
+      fetch('/health'),
+    ]);
+    const auditData = await auditRes.json();
+    const healthData = await healthRes.json();
+
+    const totalReqs = auditData.requests || 0;
+    const blockedReqs = auditData.security?.blocked || 0;
+    const blockRate = totalReqs > 0 ? ((blockedReqs / totalReqs) * 100).toFixed(1) + '%' : '0.0%';
+
+    document.getElementById('ops-requests-min').textContent = Math.round(totalReqs / 60).toLocaleString();
+    document.getElementById('ops-block-rate').textContent = blockRate;
+    document.getElementById('ops-provider-uptime').textContent = (healthData.status || 'healthy').toUpperCase();
+
+    let totalLat = 0;
+    let provCount = 0;
+    const provEntries = Object.entries(auditData.providers || {});
+    for (const [_, p] of provEntries) {
+      if (p.avgLatency) { totalLat += p.avgLatency; provCount++; }
+    }
+    const avgLat = provCount > 0 ? Math.round(totalLat / provCount) : 0;
+    document.getElementById('ops-avg-latency').textContent = avgLat + 'ms';
+    document.getElementById('ops-failover-count').textContent = (auditData.failovers || 0).toString();
+
+    // Render provider list
+    const provContainer = document.getElementById('ops-providers-list');
+    if (provEntries.length === 0) {
+      provContainer.innerHTML = '<div class="text-sm text-text-muted">No provider telemetry available</div>';
+    } else {
+      provContainer.innerHTML = provEntries.map(([name, p]) => {
+        return '<div class="flex items-center justify-between p-3 bg-elevated rounded-lg border border-border-subtle text-xs">' +
+          '<span class="font-mono font-bold uppercase text-text-primary">' + name + '</span>' +
+          '<div class="flex items-center gap-4 font-mono">' +
+            '<span class="text-success">' + (p.successRate || 100) + '% Success</span>' +
+            '<span class="text-text-muted">' + (p.avgLatency || 0) + 'ms latency</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    // Render threats list
+    const threatsContainer = document.getElementById('ops-threats-list');
+    const threats = auditData.topThreats || [];
+    if (threats.length === 0) {
+      threatsContainer.innerHTML = '<div class="text-sm text-text-muted">No threat detections recorded</div>';
+    } else {
+      threatsContainer.innerHTML = threats.map(t => {
+        return '<div class="flex items-center justify-between p-2.5 bg-elevated rounded-lg border border-border-subtle text-xs">' +
+          '<span class="font-mono text-error font-medium">' + t + '</span>' +
+          '<span class="px-2 py-0.5 rounded text-[0.65rem] font-mono bg-error/10 text-error">FLAGGED</span>' +
+        '</div>';
+      }).join('');
+    }
+  } catch (err) {
+    console.error('Failed to fetch operations stats:', err);
   }
 }
 

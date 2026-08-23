@@ -137,6 +137,7 @@ describe("M7A — Dynamic Policy Store & Runtime", () => {
       createdBy: "admin",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      organizationId: null,
     };
 
     const rule = toPolicyRule(stored);

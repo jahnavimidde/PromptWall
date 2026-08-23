@@ -17,8 +17,8 @@
 
 import type { CandidateSummary } from "@promptwall/engine";
 import { getConfig } from "../config";
-import { createLogDatabase, migrateLogDatabase, type LogKysely } from "./db";
 import type { StoredSecurityEvent } from "./audit-logger";
+import { createLogDatabase, type LogKysely, migrateLogDatabase } from "./db";
 
 // ── Query Filter Interface ───────────────────────────────────────────────────
 
@@ -40,6 +40,8 @@ export interface AuditQueryFilter {
   readonly offset?: number;
   readonly sortBy?: "timestamp" | "riskScore" | "latencyMs";
   readonly sortOrder?: "asc" | "desc";
+  /** M12: restrict results to a specific organization. Enforced for non-ADMIN callers. */
+  readonly organizationId?: string;
 }
 
 export interface AuditQueryResult {
@@ -134,6 +136,10 @@ export async function querySecurityEvents(
   if (filter.detector) {
     query = query.where("detectors_triggered", "like", `%"${filter.detector}"%`);
   }
+  // M12: tenant isolation — restrict to a specific organization's events
+  if (filter.organizationId) {
+    query = query.where("organization_id", "=", filter.organizationId);
+  }
 
   // Count total matching records before applying limit/offset
   const countResult = await query
@@ -169,7 +175,7 @@ export async function querySecurityEvents(
 
   for (const row of rows) {
     const rawCandidates = JSON.parse(row.candidates) as CandidateSummary[];
-    
+
     // Post-filter in JS for JSON array attributes if specified
     if (filter.category && !rawCandidates.some((c) => c.category === filter.category)) {
       continue;
@@ -227,23 +233,25 @@ export async function getSecurityEventById(
   const { db, ready } = getDb(customDb);
   await ready;
 
-  let query = db.selectFrom("security_events").select([
-    "id",
-    "event_id",
-    "request_id",
-    "timestamp",
-    "source",
-    "provider",
-    "model",
-    "risk_score",
-    "risk_level",
-    "action",
-    "decision_reason",
-    "candidates",
-    "detectors_triggered",
-    "matched_rule_ids",
-    "latency_ms",
-  ]);
+  let query = db
+    .selectFrom("security_events")
+    .select([
+      "id",
+      "event_id",
+      "request_id",
+      "timestamp",
+      "source",
+      "provider",
+      "model",
+      "risk_score",
+      "risk_level",
+      "action",
+      "decision_reason",
+      "candidates",
+      "detectors_triggered",
+      "matched_rule_ids",
+      "latency_ms",
+    ]);
 
   if (typeof idOrEventId === "number" || /^\d+$/.test(String(idOrEventId))) {
     query = query.where("id", "=", Number(idOrEventId));

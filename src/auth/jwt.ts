@@ -6,7 +6,7 @@
  */
 
 import { sign, verify } from "hono/jwt";
-import type { Role } from "./permissions";
+import type { OrgRole, Role } from "./permissions";
 
 const DEFAULT_JWT_SECRET = "promptwall-enterprise-jwt-secret-key-change-in-prod";
 
@@ -15,6 +15,12 @@ export interface JwtUserPayload {
   email: string;
   role: Role;
   exp: number;
+  /** M12: tenant org the user belongs to. Absent for legacy/system tokens. */
+  organizationId?: string;
+  /** M12: org-scoped role within the user's organization. */
+  orgRole?: OrgRole;
+  /** Allow arbitrary additional JWT claims (required by hono/jwt JWTPayload) */
+  [key: string]: unknown;
 }
 
 function getJwtSecret(): string {
@@ -29,13 +35,17 @@ export async function signUserToken(
   email: string,
   role: Role,
   expiresInSeconds = 24 * 60 * 60,
+  organizationId?: string,
+  orgRole?: OrgRole,
 ): Promise<string> {
   const secret = getJwtSecret();
-  const payload = {
+  const payload: JwtUserPayload = {
     sub: userId,
     email,
     role,
     exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    ...(organizationId ? { organizationId } : {}),
+    ...(orgRole ? { orgRole } : {}),
   };
   return await sign(payload, secret, "HS256");
 }
@@ -47,7 +57,7 @@ export async function verifyUserToken(token: string): Promise<JwtUserPayload | n
   try {
     const secret = getJwtSecret();
     const payload = (await verify(token, secret, "HS256")) as unknown as JwtUserPayload;
-    if (!payload || !payload.sub || !payload.role) {
+    if (!payload?.sub || !payload.role) {
       return null;
     }
     return payload;

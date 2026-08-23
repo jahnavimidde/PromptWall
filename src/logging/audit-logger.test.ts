@@ -15,20 +15,20 @@
  * modifying global mocks, ensuring zero cross-test file pollution.
  */
 
-import { describe, expect, test, afterEach } from "bun:test";
-import { fetch as nativeFetch } from "bun";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Hono } from "hono";
-import { Kysely, SqliteDialect, type SqliteDatabase, type SqliteStatement } from "kysely";
+import { describe, expect, test } from "bun:test";
 import {
   buildSecurityEvent,
-  type PipelineResult,
   type Candidate,
   type CandidateSummary,
+  type PipelineResult,
 } from "@promptwall/engine";
+import { fetch as nativeFetch } from "bun";
+import { Hono } from "hono";
+import { Kysely, type SqliteDatabase, SqliteDialect, type SqliteStatement } from "kysely";
+import { getAuditLogger, SqliteAuditLogger } from "./audit-logger";
 import type { LogDatabase } from "./db";
 import { migrateLogDatabase } from "./db";
-import { SqliteAuditLogger, getAuditLogger } from "./audit-logger";
 
 // ── In-memory Kysely helper ───────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ function makeSecretCandidate(overrides: Partial<Candidate> = {}): Candidate {
     id: crypto.randomUUID(),
     category: "secret",
     subtype: "AWS_ACCESS_KEY",
-    value: rawSecret,               // ← THIS must NOT be stored
+    value: rawSecret, // ← THIS must NOT be stored
     normalizedValue: rawSecret.toLowerCase(), // ← THIS must NOT be stored
     location: { start: 0, end: rawSecret.length }, // ← THIS must NOT be stored
     confidence: 0.99,
@@ -101,12 +101,14 @@ function makeSecretCandidate(overrides: Partial<Candidate> = {}): Candidate {
   };
 }
 
-function makePipelineResult(overrides: {
-  action?: "allow" | "mask" | "block";
-  candidates?: Candidate[];
-  riskScore?: number;
-  riskLevel?: string;
-} = {}): PipelineResult {
+function makePipelineResult(
+  overrides: {
+    action?: "allow" | "mask" | "block";
+    candidates?: Candidate[];
+    riskScore?: number;
+    riskLevel?: string;
+  } = {},
+): PipelineResult {
   const candidates = overrides.candidates ?? [makeSecretCandidate()];
   const action = overrides.action ?? "block";
   const riskScore = overrides.riskScore ?? 91;
@@ -173,7 +175,10 @@ describe("A. buildSecurityEvent — shape and field mapping", () => {
 
   test("detectorsTriggered is a deduplicated list of detector ids", () => {
     const c1 = makeSecretCandidate({ id: crypto.randomUUID(), detector: "secret-regex-detector" });
-    const c2 = makeSecretCandidate({ id: crypto.randomUUID(), detector: "entropy-secret-detector" });
+    const c2 = makeSecretCandidate({
+      id: crypto.randomUUID(),
+      detector: "entropy-secret-detector",
+    });
     const c3 = makeSecretCandidate({ id: crypto.randomUUID(), detector: "secret-regex-detector" }); // duplicate
 
     const result = makePipelineResult({ candidates: [c1, c2, c3] });
@@ -203,7 +208,12 @@ describe("A. buildSecurityEvent — shape and field mapping", () => {
   });
 
   test("empty candidates list produces empty detectorsTriggered", () => {
-    const result = makePipelineResult({ candidates: [], action: "allow", riskScore: 0, riskLevel: "low" });
+    const result = makePipelineResult({
+      candidates: [],
+      action: "allow",
+      riskScore: 0,
+      riskLevel: "low",
+    });
     const event = buildSecurityEvent(result, {
       requestId: "r",
       provider: "openai",
@@ -342,7 +352,12 @@ describe("C. Storage — multiple events", () => {
     const auditLogger = new SqliteAuditLogger({ db });
 
     for (let i = 0; i < 5; i++) {
-      const result = makePipelineResult({ action: "allow", candidates: [], riskScore: 0, riskLevel: "low" });
+      const result = makePipelineResult({
+        action: "allow",
+        candidates: [],
+        riskScore: 0,
+        riskLevel: "low",
+      });
       const event = buildSecurityEvent(result, {
         requestId: `req-page-${i}`,
         provider: "openai",
@@ -391,7 +406,12 @@ describe("C. Storage — multiple events", () => {
       timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
-    const recentResult = makePipelineResult({ action: "allow", candidates: [], riskScore: 0, riskLevel: "low" });
+    const recentResult = makePipelineResult({
+      action: "allow",
+      candidates: [],
+      riskScore: 0,
+      riskLevel: "low",
+    });
     const recentEvent = buildSecurityEvent(recentResult, {
       requestId: "req-recent",
       provider: "openai",

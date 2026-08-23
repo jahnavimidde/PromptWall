@@ -8,8 +8,8 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { type JwtUserPayload, signUserToken } from "../auth/jwt";
 import { authMiddleware } from "../auth/middleware";
-import { signUserToken, type JwtUserPayload } from "../auth/jwt";
 import { UserStore } from "../auth/user-store";
 
 export const authRoutes = new Hono();
@@ -52,7 +52,14 @@ authRoutes.post("/login", zValidator("json", LoginSchema), async (c) => {
     );
   }
 
-  const token = await signUserToken(user.id, user.email, user.role);
+  const token = await signUserToken(
+    user.id,
+    user.email,
+    user.role,
+    undefined,
+    user.organizationId ?? undefined,
+    (user.orgRole as import("../auth/permissions").OrgRole | null) ?? undefined,
+  );
 
   return c.json({
     token,
@@ -60,6 +67,8 @@ authRoutes.post("/login", zValidator("json", LoginSchema), async (c) => {
       id: user.id,
       email: user.email,
       role: user.role,
+      organizationId: user.organizationId ?? null,
+      orgRole: user.orgRole ?? null,
     },
   });
 });

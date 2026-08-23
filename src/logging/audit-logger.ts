@@ -24,11 +24,15 @@
  * This module never re-reads or re-serialises raw Candidate fields.
  */
 
-import type { AuditLogger, CandidateSummary, SecurityEvent } from "@promptwall/engine";
+import type {
+  AuditLogger,
+  CandidateSummary,
+  PipelineResult,
+  SecurityEvent,
+} from "@promptwall/engine";
 import { buildSecurityEvent } from "@promptwall/engine";
-import type { PipelineResult } from "@promptwall/engine";
-import { getConfig, type Config } from "../config";
-import { createLogDatabase, migrateLogDatabase, type LogKysely } from "./db";
+import { type Config, getConfig } from "../config";
+import { createLogDatabase, type LogKysely, migrateLogDatabase } from "./db";
 
 // ── SqliteAuditLogger ─────────────────────────────────────────────────────────
 

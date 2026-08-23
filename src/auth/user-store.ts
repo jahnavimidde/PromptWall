@@ -7,7 +7,7 @@
  */
 
 import { getConfig } from "../config";
-import { createLogDatabase, migrateLogDatabase, type LogKysely, type UsersTable } from "../logging/db";
+import { createLogDatabase, type LogKysely, migrateLogDatabase } from "../logging/db";
 import type { Role } from "./permissions";
 
 export interface StoredUser {
@@ -15,6 +15,10 @@ export interface StoredUser {
   email: string;
   passwordHash: string;
   role: Role;
+  /** M12: organization this user belongs to */
+  organizationId: string | null;
+  /** M12: org-scoped role within the user's organization */
+  orgRole: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,7 +52,13 @@ export class UserStore {
   /**
    * Create a new user with hashed password.
    */
-  async createUser(email: string, plainPassword: string, role: Role = "VIEWER"): Promise<StoredUser> {
+  async createUser(
+    email: string,
+    plainPassword: string,
+    role: Role = "VIEWER",
+    organizationId: string | null = null,
+    orgRole: string | null = null,
+  ): Promise<StoredUser> {
     await this.ready;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -71,6 +81,8 @@ export class UserStore {
         email: normalizedEmail,
         password_hash: passwordHash,
         role,
+        organization_id: organizationId,
+        org_role: orgRole,
         created_at: now,
         updated_at: now,
       })
@@ -81,6 +93,8 @@ export class UserStore {
       email: normalizedEmail,
       passwordHash,
       role,
+      organizationId,
+      orgRole,
       createdAt: now,
       updatedAt: now,
     };
@@ -106,6 +120,8 @@ export class UserStore {
       email: row.email,
       passwordHash: row.password_hash,
       role: row.role as Role,
+      organizationId: row.organization_id ?? null,
+      orgRole: row.org_role ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
     };
@@ -145,6 +161,6 @@ export class UserStore {
     }
 
     console.log(`[UserStore] Seeding initial admin user: ${adminEmail}`);
-    return await this.createUser(adminEmail, adminPassword, "ADMIN");
+    return await this.createUser(adminEmail, adminPassword, "ADMIN", "org_system", "ORG_ADMIN");
   }
 }

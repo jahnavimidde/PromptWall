@@ -22,7 +22,7 @@
  * as literals in this source file.
  */
 
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { signUserToken } from "../auth/jwt";
 import { PolicyStore } from "../policy/policy-store";
@@ -69,10 +69,7 @@ function buildInjectionPayload(): string {
 
 // ── Simulate helper ───────────────────────────────────────────────────────────
 
-async function simulate(
-  token: string,
-  body: Record<string, unknown>,
-): Promise<Response> {
+async function simulate(token: string, body: Record<string, unknown>): Promise<Response> {
   return app.request("/api/policies/simulate", {
     method: "POST",
     headers: {
@@ -98,7 +95,6 @@ afterAll(async () => {
 // ── Suite ─────────────────────────────────────────────────────────────────────
 
 describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
-
   // ---------------------------------------------------------------------------
   // 1. Authentication & Authorization
   // ---------------------------------------------------------------------------
@@ -117,7 +113,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const res = await simulate(token, { content: "hello world" });
       expect(res.status).toBe(200);
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       expect(body.simulation).toBeDefined();
       expect(body.simulation.action).toBeDefined();
     });
@@ -126,7 +122,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await analystToken();
       const res = await simulate(token, { content: "hello world" });
       expect(res.status).toBe(200);
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       expect(body.simulation).toBeDefined();
     });
 
@@ -182,7 +178,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
         content: "What is the capital of France?",
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: { action: string; riskLevel: string; candidates: unknown[] };
       };
       expect(body.simulation.action).toBe("allow");
@@ -194,7 +190,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const content = `My API key is ${buildSyntheticAwsKey()} — please keep this safe`;
       const res = await simulate(token, { content });
       expect(res.status).toBe(200);
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: {
           action: string;
           riskLevel: string;
@@ -215,7 +211,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const res = await simulate(token, { content: buildInjectionPayload() });
       expect(res.status).toBe(200);
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: {
           action: string;
           candidates: Array<{ category: string }>;
@@ -242,11 +238,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       // Cast to satisfy the full typeof fetch signature (including preconnect).
       globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url =
-          typeof input === "string"
-            ? input
-            : input instanceof Request
-              ? input.url
-              : String(input);
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
         if (
           url.includes("openai.com") ||
           url.includes("googleapis.com") ||
@@ -325,13 +317,20 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
         content: `Here is a key: ${buildSyntheticAwsKey()}`,
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: { candidates: Array<Record<string, unknown>> };
       };
 
       for (const cand of body.simulation.candidates) {
         // Only these fields are allowed
-        const allowedFields = new Set(["id", "category", "subtype", "severity", "confidence", "detector"]);
+        const allowedFields = new Set([
+          "id",
+          "category",
+          "subtype",
+          "severity",
+          "confidence",
+          "detector",
+        ]);
         const actualFields = Object.keys(cand);
         for (const field of actualFields) {
           expect(allowedFields.has(field)).toBe(true);
@@ -343,7 +342,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const res = await simulate(token, { content: "Hello world" });
       expect(res.status).toBe(200);
-      const body = await res.json() as { simulation: Record<string, unknown> };
+      const body = (await res.json()) as { simulation: Record<string, unknown> };
       expect(body).toHaveProperty("simulation");
 
       const sim = body.simulation;
@@ -397,7 +396,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const res = await simulate(token, { content });
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       // The custom allow-all rule at priority 1 should win over default block rules
       expect(body.simulation.action).toBe("allow");
     });
@@ -425,7 +424,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const res = await simulate(token, { content });
       expect(res.status).toBe(200);
 
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: { action: string; decisionReason: string };
       };
       expect(body.simulation.action).toBe("block");
@@ -454,7 +453,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const res = await simulate(token, { content });
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       // Default policy for critical secret is block — disabled DB policy must not fire
       expect(body.simulation.action).toBe("block");
     });
@@ -483,7 +482,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const res = await simulate(token, { content: "What is the weather like today?" });
       expect(res.status).toBe(200);
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       expect(body.simulation.action).toBe("allow");
     });
 
@@ -492,7 +491,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const content = `Secret: ${buildSyntheticAwsKey()}`;
       const res = await simulate(token, { content });
       expect(res.status).toBe(200);
-      const body = await res.json() as { simulation: { action: string } };
+      const body = (await res.json()) as { simulation: { action: string } };
       expect(body.simulation.action).toBe("block");
     });
   });
@@ -506,7 +505,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const res = await simulate(token, { content: "hello world" });
       expect(res.status).toBe(200);
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         simulation: {
           action: string;
           riskLevel: string;
@@ -528,7 +527,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
     test("riskScore is in [0, 100]", async () => {
       const token = await adminToken();
       const res = await simulate(token, { content: "hello" });
-      const body = await res.json() as { simulation: { riskScore: number } };
+      const body = (await res.json()) as { simulation: { riskScore: number } };
       expect(body.simulation.riskScore).toBeGreaterThanOrEqual(0);
       expect(body.simulation.riskScore).toBeLessThanOrEqual(100);
     });
@@ -537,7 +536,7 @@ describe("M8A — Policy Simulator (POST /api/policies/simulate)", () => {
       const token = await adminToken();
       const content = `Key1: ${buildSyntheticAwsKey()} and also: ${buildSyntheticAwsKey()}`;
       const res = await simulate(token, { content });
-      const body = await res.json() as { simulation: { detectorsTriggered: string[] } };
+      const body = (await res.json()) as { simulation: { detectorsTriggered: string[] } };
       const dt = body.simulation.detectorsTriggered;
       const unique = new Set(dt);
       expect(dt.length).toBe(unique.size);

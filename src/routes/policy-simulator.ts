@@ -42,14 +42,13 @@
  */
 
 import { zValidator } from "@hono/zod-validator";
+import type { Candidate, CandidateSummary } from "@promptwall/engine";
+import { DetectionPipeline } from "@promptwall/engine";
 import { Hono } from "hono";
 import { z } from "zod";
 import { authMiddleware, requireRole } from "../auth/middleware";
-import { DetectionPipeline } from "@promptwall/engine";
-import type { CandidateSummary } from "@promptwall/engine";
-import type { Candidate } from "@promptwall/engine";
-import { getPolicyEngine } from "../policy/runtime";
 import type { PolicyStore } from "../policy/policy-store";
+import { getPolicyEngine } from "../policy/runtime";
 
 export const simulatorRoutes = new Hono();
 
@@ -153,41 +152,37 @@ function toSafeSummary(c: Candidate): CandidateSummary {
  * }
  * ```
  */
-simulatorRoutes.post(
-  "/simulate",
-  zValidator("json", SimulateRequestSchema),
-  async (c) => {
-    const input = c.req.valid("json");
+simulatorRoutes.post("/simulate", zValidator("json", SimulateRequestSchema), async (c) => {
+  const input = c.req.valid("json");
 
-    // Obtain the current live PolicyEngine (reads from DB, falls back to defaults).
-    // Accept optional custom store injected via context for testability.
-    const customStore = c.get("_testPolicyStore" as never) as PolicyStore | undefined;
-    const policyEngine = await getPolicyEngine(customStore);
+  // Obtain the current live PolicyEngine (reads from DB, falls back to defaults).
+  // Accept optional custom store injected via context for testability.
+  const customStore = c.get("_testPolicyStore" as never) as PolicyStore | undefined;
+  const policyEngine = await getPolicyEngine(customStore);
 
-    // Build a DetectionPipeline injecting the current policy engine.
-    // No provider is involved — the pipeline is purely local.
-    const pipeline = new DetectionPipeline({ policyEngine });
+  // Build a DetectionPipeline injecting the current policy engine.
+  // No provider is involved — the pipeline is purely local.
+  const pipeline = new DetectionPipeline({ policyEngine });
 
-    // Run detection. Never forwards to a provider; never mutates input.
-    const result = await pipeline.run({
-      content: input.content,
-      mimeType: input.mimeType,
-    });
+  // Run detection. Never forwards to a provider; never mutates input.
+  const result = await pipeline.run({
+    content: input.content,
+    mimeType: input.mimeType,
+  });
 
-    // Project to safe summaries — strips value, normalizedValue, location,
-    // evidence, and metadata from each candidate.
-    const candidateSummaries = result.candidates.map(toSafeSummary);
-    const detectorsTriggered = [...new Set(candidateSummaries.map((cs) => cs.detector))];
+  // Project to safe summaries — strips value, normalizedValue, location,
+  // evidence, and metadata from each candidate.
+  const candidateSummaries = result.candidates.map(toSafeSummary);
+  const detectorsTriggered = [...new Set(candidateSummaries.map((cs) => cs.detector))];
 
-    const simulation: SimulationResult = {
-      action: result.policyDecision.action,
-      riskLevel: result.policyDecision.riskLevel,
-      riskScore: result.policyDecision.riskScore,
-      decisionReason: result.policyDecision.reason,
-      detectorsTriggered,
-      candidates: candidateSummaries,
-    };
+  const simulation: SimulationResult = {
+    action: result.policyDecision.action,
+    riskLevel: result.policyDecision.riskLevel,
+    riskScore: result.policyDecision.riskScore,
+    decisionReason: result.policyDecision.reason,
+    detectorsTriggered,
+    candidates: candidateSummaries,
+  };
 
-    return c.json({ simulation });
-  },
-);
+  return c.json({ simulation });
+});

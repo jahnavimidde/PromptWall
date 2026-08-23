@@ -4,14 +4,14 @@ import { Hono } from "hono";
 import { proxy } from "hono/proxy";
 import { getConfig, type MaskingConfig } from "../config";
 import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
+import { logSecurityEvent } from "../logging/audit-logger";
 import { formatMaskedRequestForLog } from "../logging/log-content";
 import { logRequest } from "../logging/logger";
-import { logSecurityEvent } from "../logging/audit-logger";
-import { getPolicyEngine } from "../policy/runtime";
 import type { PlaceholderContext } from "../masking/context";
 import { openaiExtractor } from "../masking/extractors/openai";
 import { restoreResponse } from "../masking/restorer";
 import type { PIIDetectResult } from "../pii/request";
+import { getPolicyEngine } from "../policy/runtime";
 import {
   PrivacyPipelineDetectionError,
   type PrivacyPipelineResult,
@@ -21,6 +21,18 @@ import { callLocal } from "../providers/local";
 // Ensure all providers self-register with the registry on startup
 import "../providers/gemini/provider";
 import "../providers/openai/provider";
+import {
+  CreditCardDetector,
+  DetectionPipeline,
+  type DetectionRequest,
+  DetectorRegistry,
+  EntropySecretDetector,
+  PiiGlinerDetector,
+  type PipelineResult,
+  PromptInjectionDetector,
+  SecretRegexDetector,
+  SemanticInjectionDetector,
+} from "@promptwall/engine";
 import type { ProviderResult } from "../providers/openai/client";
 import { createUnmaskingStream } from "../providers/openai/stream-transformer";
 import {
@@ -29,26 +41,14 @@ import {
   OpenAIRequestSchema,
   type OpenAIResponse,
 } from "../providers/openai/types";
-import {
-  DetectionPipeline,
-  DetectorRegistry,
-  PromptInjectionDetector,
-  SemanticInjectionDetector,
-  SecretRegexDetector,
-  EntropySecretDetector,
-  CreditCardDetector,
-  PiiGlinerDetector,
-  type DetectionRequest,
-  type PipelineResult,
-} from "@promptwall/engine";
-import { providerRegistry } from "../providers/registry";
+import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
 import {
   createLogData,
-  type ProviderId,
   errorFormats,
   handleProviderError,
+  type ProviderId,
   setBlockedHeaders,
   setResponseHeaders,
   setStreamingHeaders,
@@ -73,7 +73,7 @@ _engineRegistry.register(new CreditCardDetector());
 _engineRegistry.register(
   new PiiGlinerDetector({ serviceUrl: _startupConfig.pii_detection.detector_url }),
 );
-const detectionPipeline = new DetectionPipeline({ registry: _engineRegistry });
+const _detectionPipeline = new DetectionPipeline({ registry: _engineRegistry });
 
 export const openaiRoutes = new Hono();
 
@@ -124,7 +124,10 @@ openaiRoutes.post(
 
       const detectionStartTime = Date.now();
       const dynamicPolicyEngine = await getPolicyEngine();
-      const dynamicPipeline = new DetectionPipeline({ registry: _engineRegistry, policyEngine: dynamicPolicyEngine });
+      const dynamicPipeline = new DetectionPipeline({
+        registry: _engineRegistry,
+        policyEngine: dynamicPolicyEngine,
+      });
       pipelineResult = await dynamicPipeline.run(detectionReq);
       const detectionLatencyMs = Date.now() - detectionStartTime;
 
@@ -444,7 +447,12 @@ function respondBlocked(
   );
 }
 
-function respondDetectionError(c: Context, body: OpenAIRequest, startTime: number, provider: ProviderId) {
+function _respondDetectionError(
+  c: Context,
+  body: OpenAIRequest,
+  startTime: number,
+  provider: ProviderId,
+) {
   logRequest(
     createLogData({
       provider,
@@ -517,7 +525,10 @@ async function sendToProvider(c: Context, originalRequest: OpenAIRequest, opts: 
     // Strip our internal routing field before forwarding the request upstream
     const upstreamRequest = stripInternalFields(request);
 
-    const result = (await provider.complete(upstreamRequest, { authHeader })) as ProviderResult;
+    const result = (await resilientProvider.complete(upstreamRequest, {
+      authHeader,
+      provider: providerId,
+    })) as ProviderResult;
     const afterProviderTime = isDemoMode ? Date.now() : 0;
 
     logRequest(

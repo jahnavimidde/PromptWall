@@ -1,14 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import pkg from "../package.json";
 import { getConfig } from "./config";
-import { getLogger } from "./logging/logger";
 import { getAuditLogger } from "./logging/audit-logger";
+import { getLogger } from "./logging/logger";
+import { requestIdMiddleware } from "./observability/request-context";
 import { getPIIDetector } from "./pii/detect";
-import { UserStore } from "./auth/user-store";
 import { anthropicRoutes } from "./routes/anthropic";
 import { apiRoutes } from "./routes/api";
 import { auditRoutes } from "./routes/audit";
@@ -18,9 +17,17 @@ import { dashboardRoutes } from "./routes/dashboard";
 import { healthRoutes } from "./routes/health";
 import { infoRoutes } from "./routes/info";
 import { landingRoutes } from "./routes/landing";
+import { metricsRoutes } from "./routes/metrics";
 import { openaiRoutes } from "./routes/openai";
+import { orgRoutes } from "./routes/organizations";
 import { policyRoutes } from "./routes/policies";
 import { simulatorRoutes } from "./routes/policy-simulator";
+import {
+  bodySizeLimit,
+  contentTypeGuard,
+  rateLimiter,
+  securityHeaders,
+} from "./security/middleware";
 
 type Variables = {
   requestId: string;
@@ -29,16 +36,37 @@ type Variables = {
 const config = getConfig();
 const app = new Hono<{ Variables: Variables }>();
 
-// Request ID middleware
-const requestIdMiddleware = createMiddleware<{ Variables: Variables }>(async (c, next) => {
-  const requestId = c.req.header("x-request-id") || crypto.randomUUID();
-  c.set("requestId", requestId);
-  c.header("X-Request-ID", requestId);
-  await next();
+// ── Security Hardening Middleware (M9A) ───────────────────────────────────────
+const secConfig = config.security;
+
+// 1. Security response headers — applied globally to every response
+app.use("*", securityHeaders());
+
+// 2. Body size protection — applied to all AI gateway and management API routes
+const sizeLimit = bodySizeLimit({ maxBytes: secConfig.max_body_size });
+app.use("/openai/*", sizeLimit);
+app.use("/anthropic/*", sizeLimit);
+app.use("/codex/*", sizeLimit);
+app.use("/api/*", sizeLimit);
+
+// 3. Content-Type enforcement — gateway POST endpoints only
+const ctGuard = contentTypeGuard({ allowedTypes: ["application/json"] });
+app.use("/openai/*", ctGuard);
+app.use("/anthropic/*", ctGuard);
+app.use("/codex/*", ctGuard);
+
+// 4. Rate limiting — AI gateway endpoints (management routes are JWT-protected)
+const limiter = rateLimiter({
+  windowMs: secConfig.rate_limit_window_ms,
+  maxRequests: secConfig.rate_limit_max_requests,
 });
+app.use("/openai/*", limiter);
+app.use("/anthropic/*", limiter);
+app.use("/codex/*", limiter);
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Middleware
-app.use("*", requestIdMiddleware);
+app.use("*", requestIdMiddleware());
 app.use("*", cors());
 app.use("*", logger());
 
@@ -63,9 +91,14 @@ app.route("/api/audit", auditRoutes);
 app.route("/api/auth", authRoutes);
 app.route("/api/policies", policyRoutes);
 app.route("/api/policies", simulatorRoutes);
+app.route("/api/organizations", orgRoutes);
 
 if (config.dashboard.enabled) {
   app.route("/dashboard", dashboardRoutes);
+}
+
+if (config.observability?.metrics_enabled) {
+  app.route("/metrics", metricsRoutes);
 }
 
 app.notFound((c) => {

@@ -8,13 +8,14 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import { authMiddleware, requireRole } from "../auth/middleware";
 import { getConfig } from "../config";
-import { getAuditLogger } from "../logging/audit-logger";
-import { getLogger } from "../logging/logger";
 import { getSecurityAnalytics } from "../logging/audit-analytics";
 import { exportSecurityEventsAsCSV, exportSecurityEventsAsJSON } from "../logging/audit-export";
+import { getAuditLogger } from "../logging/audit-logger";
 import { getSecurityEventById, querySecurityEvents } from "../logging/audit-query";
-import { authMiddleware, optionalAuthMiddleware, requireRole } from "../auth/middleware";
+import { getLogger } from "../logging/logger";
+import { type GlobalProviderMetrics, getProviderMetrics } from "../providers/provider-metrics";
 
 export const auditRoutes = new Hono();
 
@@ -111,35 +112,79 @@ auditRoutes.get("/stats", zValidator("query", AuditStatsQuerySchema), async (c) 
 });
 
 /**
+ * GET /api/audit/dashboard - Aggregated operational and security dashboard metrics (M10)
+ */
+auditRoutes.get("/dashboard", async (c) => {
+  const analytics = await getSecurityAnalytics("all");
+  const providerStats = getProviderMetrics() as GlobalProviderMetrics;
+
+  const providers: Record<string, { successRate: number; avgLatency: number }> = {};
+  for (const [name, stats] of Object.entries(providerStats.providers)) {
+    const successRate =
+      stats.totalRequests > 0
+        ? Number(((stats.successfulRequests / stats.totalRequests) * 100).toFixed(1))
+        : 100;
+    providers[name] = {
+      successRate,
+      avgLatency: stats.averageLatencyMs,
+    };
+  }
+
+  // If no providers tracked yet, provide default fallback keys
+  if (Object.keys(providers).length === 0) {
+    providers.gemini = { successRate: 100, avgLatency: 0 };
+    providers.openai = { successRate: 100, avgLatency: 0 };
+  }
+
+  const topThreats = analytics.topThreatSubtypes.map((t) => t.subtype).slice(0, 10);
+
+  return c.json({
+    requests: Math.max(analytics.totalEvents, providerStats.totalRequests),
+    security: {
+      blocked: analytics.actionBreakdown.block,
+      masked: analytics.actionBreakdown.mask,
+    },
+    providers,
+    topThreats,
+  });
+});
+
+/**
  * GET /api/audit/export - Compliance audit export (CSV or JSON format)
  * Requires ADMIN or SECURITY_ANALYST role.
  */
-auditRoutes.get("/export", authMiddleware, requireRole(["ADMIN", "SECURITY_ANALYST"]), zValidator("query", AuditExportQuerySchema), async (c) => {
-  const { format, ...filter } = c.req.valid("query");
-  const result = await querySecurityEvents(filter);
+auditRoutes.get(
+  "/export",
+  authMiddleware,
+  requireRole(["ADMIN", "SECURITY_ANALYST"]),
+  zValidator("query", AuditExportQuerySchema),
+  async (c) => {
+    const { format, ...filter } = c.req.valid("query");
+    const result = await querySecurityEvents(filter);
 
-  const timestampStr = new Date().toISOString().slice(0, 10);
+    const timestampStr = new Date().toISOString().slice(0, 10);
 
-  if (format === "csv") {
-    const csvContent = exportSecurityEventsAsCSV(result.events);
-    return new Response(csvContent, {
+    if (format === "csv") {
+      const csvContent = exportSecurityEventsAsCSV(result.events);
+      return new Response(csvContent, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="promptwall-audit-${timestampStr}.csv"`,
+        },
+      });
+    }
+
+    const jsonContent = exportSecurityEventsAsJSON(result.events);
+    return new Response(jsonContent, {
       status: 200,
       headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="promptwall-audit-${timestampStr}.csv"`,
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="promptwall-audit-${timestampStr}.json"`,
       },
     });
-  }
-
-  const jsonContent = exportSecurityEventsAsJSON(result.events);
-  return new Response(jsonContent, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="promptwall-audit-${timestampStr}.json"`,
-    },
-  });
-});
+  },
+);
 
 /**
  * POST /api/audit/cleanup - Trigger manual retention cleanup

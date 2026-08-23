@@ -45,6 +45,13 @@ providers:
   codex:
     base_url: https://chatgpt.com/backend-api/codex
 
+  # Provider Resilience & Fault Tolerance (M9B)
+  # timeout_ms: 30000
+  # max_retries: 3
+  # retry_delay_ms: 500
+  # circuit_failure_threshold: 5
+  # circuit_reset_timeout_ms: 30000
+
 # Local provider - only used when mode: route
 # Supports: ollama (native), openai (for vLLM, LocalAI, LM Studio, etc.)
 local:
@@ -163,3 +170,35 @@ dashboard:
   # auth:
   #   username: admin
   #   password: ${DASHBOARD_PASSWORD}
+
+# Request Security Hardening (M9A)
+# Controls protective middleware applied before the detection pipeline.
+security:
+  # Maximum incoming request body size in bytes (default: 1 MiB).
+  # Requests with a larger body receive HTTP 413 Content Too Large.
+  # Override via environment variable: PROMPTWALL_MAX_BODY_SIZE
+  max_body_size: ${PROMPTWALL_MAX_BODY_SIZE:-1048576}
+
+  # Sliding-window duration for per-IP rate limiting in milliseconds (default: 60s).
+  rate_limit_window_ms: 60000
+
+  # Maximum number of requests allowed per IP per window (default: 100).
+  # Requests exceeding this receive HTTP 429 Too Many Requests with a Retry-After header.
+  rate_limit_max_requests: 100
+
+# Enterprise Observability & Monitoring (M10)
+observability:
+  # Expose Prometheus metrics endpoint at /metrics
+  metrics_enabled: true
+
+  # Enable structured JSON operational logging
+  request_logging: true
+
+  # Optional bearer token for /metrics authentication.
+  # If empty, /metrics is accessible without auth (standard for internal scraping).
+  prometheus_auth_token: ${PROMETHEUS_AUTH_TOKEN:-}
+
+# Health & Readiness Probes (M10)
+health:
+  # Timeout in milliseconds for readiness checks (/health/ready)
+  readiness_timeout_ms: 3000

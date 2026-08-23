@@ -5,17 +5,17 @@
  * M7B/M7C Unit & Integration Tests for Authentication, JWT & RBAC.
  */
 
-import { describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Kysely, SqliteDialect, type SqliteDatabase, type SqliteStatement } from "kysely";
+import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
+import { Kysely, type SqliteDatabase, SqliteDialect, type SqliteStatement } from "kysely";
 import type { LogDatabase } from "../logging/db";
 import { migrateLogDatabase } from "../logging/db";
-import { UserStore } from "./user-store";
-import { signUserToken, verifyUserToken } from "./jwt";
-import { hasPermission, isValidRole } from "./permissions";
-import { authMiddleware, requireRole } from "./middleware";
 import { authRoutes } from "../routes/auth";
+import { signUserToken, verifyUserToken } from "./jwt";
+import { authMiddleware, requireRole } from "./middleware";
+import { hasPermission, isValidRole } from "./permissions";
+import { UserStore } from "./user-store";
 
 class BunSqliteDatabase implements SqliteDatabase {
   constructor(private readonly db: Database) {}
@@ -55,7 +55,11 @@ describe("M7B & M7C — Authentication & RBAC Engine", () => {
     const db = await createInMemoryDb();
     const userStore = new UserStore({ db });
 
-    const user = await userStore.createUser("analyst@promptwall.com", "SecurePassword123!", "SECURITY_ANALYST");
+    const user = await userStore.createUser(
+      "analyst@promptwall.com",
+      "SecurePassword123!",
+      "SECURITY_ANALYST",
+    );
 
     expect(user.id).toMatch(/^usr_/);
     expect(user.email).toBe("analyst@promptwall.com");

@@ -19,7 +19,7 @@ import { anthropicAdapter } from "../providers/anthropic/adapter";
 import { createAnthropicUnmaskingStream } from "../providers/anthropic/stream-transformer";
 import { type AnthropicRequest, AnthropicRequestSchema } from "../providers/anthropic/types";
 import { callLocalAnthropic } from "../providers/local";
-import { providerRegistry } from "../providers/registry";
+import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { LLMRequest, LLMResponse } from "../providers/types";
 import type { SecretsProcessResult } from "../secrets/request";
 import {
@@ -362,10 +362,12 @@ async function sendToAnthropic(c: Context, request: AnthropicRequest, opts: Send
       throw new Error("Anthropic provider not registered");
     }
 
-    const result = await provider.complete(request as LLMRequest, {
+    const result = await resilientProvider.complete(request as LLMRequest, {
       apiKey: clientHeaders.apiKey,
       authHeader: clientHeaders.authorization,
       beta: clientHeaders.beta,
+      provider: "anthropic",
+      allowFailover: false,
     });
     const afterProviderTime = isDemoMode ? Date.now() : 0;
 

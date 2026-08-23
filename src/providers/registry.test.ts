@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { providerRegistry } from "./registry";
-import { OpenAIProvider } from "./openai/provider";
-import { GeminiProvider } from "./gemini/provider";
 import { AnthropicProvider } from "./anthropic/provider";
 import { CodexProvider } from "./codex/provider";
+import { GeminiProvider } from "./gemini/provider";
+import { OpenAIProvider } from "./openai/provider";
+import { providerRegistry } from "./registry";
 import type { LLMProvider, ProviderCapabilities, ProviderInfo } from "./types";
 
 const mockCapabilities: ProviderCapabilities = {

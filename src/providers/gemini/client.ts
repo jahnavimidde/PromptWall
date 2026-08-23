@@ -32,7 +32,7 @@ export async function callGemini(
 
   const baseUrl = config.base_url.replace(/\/$/, "");
   const action = isStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
-  let endpoint = `${baseUrl}/models/${model}:${action}`;
+  const endpoint = `${baseUrl}/models/${model}:${action}`;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

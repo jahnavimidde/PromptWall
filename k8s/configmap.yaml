@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promptwall-config
+  namespace: default
+  labels:
+    app.kubernetes.io/name: promptwall
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: promptwall-enterprise
+data:
+  PORT: "3000"
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  PROMPTWALL_MODE: "route"
+  METRICS_ENABLED: "true"
+  PROMPTWALL_MAX_BODY_SIZE: "1048576"
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX_REQUESTS: "100"
+  PROVIDER_TIMEOUT_MS: "30000"
+  MAX_RETRIES: "3"
+  CIRCUIT_FAILURE_THRESHOLD: "5"
+  CIRCUIT_RESET_TIMEOUT_MS: "30000"
+  READINESS_TIMEOUT_MS: "3000"

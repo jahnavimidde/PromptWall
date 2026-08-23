@@ -40,3 +40,27 @@ services:
     ports:
       - "${PASTEGUARD_DETECTOR_PORT:-5002}:5002"
     restart: unless-stopped
+
+  # Enterprise Observability (M10): Prometheus metrics scraper
+  prometheus:
+    profiles: ["observability", "prod"]
+    image: prom/prometheus:v2.51.0
+    container_name: promptwall-prometheus
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    depends_on:
+      - pasteguard
+
+  # Enterprise Observability (M10): Grafana dashboard visualization
+  grafana:
+    profiles: ["observability", "prod"]
+    image: grafana/grafana:10.4.1
+    container_name: promptwall-grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    restart: unless-stopped
+    depends_on:
+      - prometheus
