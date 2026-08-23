@@ -1,0 +1,8 @@
+{
+  "include": ["detector"],
+  "venvPath": "detector",
+  "venv": ".venv",
+  "extraPaths": ["detector"],
+  "pythonVersion": "3.10",
+  "reportMissingTypeStubs": false
+}
