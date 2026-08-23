@@ -1,5 +1,4 @@
-"""Integration tests for the /analyze/injection HTTP contract.
-"""
+"""Integration tests for the /analyze/injection HTTP contract."""
 
 import pytest
 from fastapi.testclient import TestClient

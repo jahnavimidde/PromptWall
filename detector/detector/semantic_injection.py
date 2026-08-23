@@ -37,27 +37,35 @@ def load_semantic_model() -> None:
         if _model is not None and _tokenizer is not None:
             return
 
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
         model_name = _get_model_name()
         try:
-            _tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-            _model = AutoModelForSequenceClassification.from_pretrained(
-                model_name, local_files_only=True
-            )
-        except Exception:
-            _tokenizer = AutoTokenizer.from_pretrained(model_name)
-            _model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        _model.eval()
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-        # Determine injection class index dynamically from model config
-        _injection_label_idx = 1
-        if hasattr(_model.config, "id2label") and _model.config.id2label:
-            for idx, label in _model.config.id2label.items():
-                lbl_upper = str(label).upper()
-                if "INJECT" in lbl_upper or "JAILBREAK" in lbl_upper or lbl_upper == "LABEL_1":
-                    _injection_label_idx = int(idx)
-                    break
+            try:
+                _tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+                _model = AutoModelForSequenceClassification.from_pretrained(
+                    model_name, local_files_only=True
+                )
+            except Exception:
+                try:
+                    _tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    _model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                except Exception as e:
+                    print(f"Warning: Semantic injection model load deferred: {e}")
+                    return
+
+            _model.eval()
+
+            # Determine injection class index dynamically from model config
+            _injection_label_idx = 1
+            if hasattr(_model.config, "id2label") and _model.config.id2label:
+                for idx, label in _model.config.id2label.items():
+                    lbl_upper = str(label).upper()
+                    if "INJECT" in lbl_upper or "JAILBREAK" in lbl_upper or lbl_upper == "LABEL_1":
+                        _injection_label_idx = int(idx)
+                        break
+        except Exception as e:
+            print(f"Warning: Failed to initialize transformers: {e}")
 
 
 def predict_injection(text: str) -> dict[str, Any]:
@@ -78,6 +86,9 @@ def predict_injection(text: str) -> dict[str, Any]:
         }
 
     load_semantic_model()
+
+    if _model is None or _tokenizer is None:
+        raise RuntimeError("Semantic injection model is not available")
 
     import torch
 

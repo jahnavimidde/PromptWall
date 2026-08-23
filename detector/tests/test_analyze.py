@@ -14,6 +14,7 @@ from detector.entities import LOCATION, PERSON, PHONE_NUMBER, Span
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(appmod, "load_model", lambda: None)
+    monkeypatch.setattr(appmod, "load_semantic_model", lambda: None)
 
     def fake_gliner(text, score_threshold=0.0):
         spans = []

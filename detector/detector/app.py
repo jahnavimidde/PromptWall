@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from bisect import bisect_left
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .deterministic import detect_deterministic
@@ -13,7 +15,7 @@ from .merge import merge
 from .semantic_injection import load_semantic_model, predict_injection
 
 
-def _utf16_mapper(text: str):
+def _utf16_mapper(text: str) -> Callable[[int], int]:
     """Return a function mapping a Python codepoint offset to a UTF-16 code-unit
     offset. PromptWall runs in JS and slices the returned offsets as UTF-16
     (`text.slice`), so an astral-plane character (emoji, rare CJK > U+FFFF)
@@ -51,14 +53,17 @@ class InjectionAnalyzeResponse(BaseModel):
 
 # Module-level reference so the background task is not garbage-collected
 # before the lifespan generator is done (fixes RUF006).
-_gliner_warmup_task: asyncio.Task | None = None
+_gliner_warmup_task: asyncio.Task[Any] | None = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global _gliner_warmup_task
     # Load the semantic model before serving so /health == ready (PromptWall polls it).
-    await asyncio.to_thread(load_semantic_model)
+    try:
+        await asyncio.to_thread(load_semantic_model)
+    except Exception as e:
+        print(f"Warning: Semantic model load deferred: {e}")
     # Warm load GLiNER PII model concurrently in a background task.
     # The reference is kept at module level so it is not garbage-collected (RUF006).
     _gliner_warmup_task = asyncio.create_task(asyncio.to_thread(load_model))
@@ -100,6 +105,4 @@ def analyze_injection(req: InjectionAnalyzeRequest) -> InjectionAnalyzeResponse:
             intent=res["intent"],
         )
     except Exception as err:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=500, detail="Semantic injection analysis failed") from err
