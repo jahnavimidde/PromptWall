@@ -11,13 +11,14 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "typecheck:benchmarks": "tsc --noEmit --project tsconfig.benchmarks.json",
-    "lint": "biome lint src benchmarks/pii-accuracy/*.ts",
-    "format": "biome format src benchmarks/pii-accuracy/*.ts --write",
-    "check": "biome check src benchmarks/pii-accuracy/*.ts",
+    "lint": "biome lint src benchmarks/pii-accuracy",
+    "format": "biome format src benchmarks/pii-accuracy --write",
+    "check": "biome check src benchmarks/pii-accuracy",
     "benchmark:accuracy": "bun run benchmarks/pii-accuracy/run.ts"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",
+    "@promptwall/engine": "file:packages/engine",
     "hono": "^4.12.23",
     "hono-tailwind": "^2.2.0",
     "kysely": "^0.29.2",

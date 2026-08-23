@@ -1,0 +1,51 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: promptwall-network-policy
+  namespace: default
+  labels:
+    app.kubernetes.io/name: promptwall
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: promptwall-enterprise
+spec:
+  podSelector:
+    matchLabels:
+      app: promptwall
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 1. Allow traffic to PromptWall HTTP port 3000 from Ingress controller and scrapers
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # 1. Allow DNS lookups (CoreDNS)
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2. Allow outbound HTTPS connections to LLM APIs (OpenAI, Anthropic, Gemini, HuggingFace)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # 3. Allow outbound connections to Enterprise PostgreSQL Database
+    - ports:
+        - protocol: TCP
+          port: 5432

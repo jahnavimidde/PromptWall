@@ -302,6 +302,9 @@ export class Logger {
   async close(): Promise<void> {
     await this.ready;
     await this.db.destroy();
+    if (loggerInstance === this) {
+      loggerInstance = null;
+    }
   }
 
   private async count(applyWhere?: (qb: CountQuery) => CountQuery): Promise<CountRow> {

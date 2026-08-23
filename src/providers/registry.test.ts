@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { AnthropicProvider } from "./anthropic/provider";
+import { CodexProvider } from "./codex/provider";
+import { GeminiProvider } from "./gemini/provider";
+import { OpenAIProvider } from "./openai/provider";
 import { providerRegistry } from "./registry";
 import type { LLMProvider, ProviderCapabilities, ProviderInfo } from "./types";
 
@@ -54,6 +58,14 @@ class MockProvider implements LLMProvider {
 describe("ProviderRegistry", () => {
   beforeEach(() => {
     providerRegistry.clear();
+  });
+
+  afterAll(() => {
+    // Re-register default providers so subsequent test files are not affected
+    providerRegistry.registerFactory("openai", () => new OpenAIProvider());
+    providerRegistry.registerFactory("gemini", () => new GeminiProvider());
+    providerRegistry.registerFactory("anthropic", () => new AnthropicProvider());
+    providerRegistry.registerFactory("codex", () => new CodexProvider());
   });
 
   test("registers and retrieves a provider instance", () => {

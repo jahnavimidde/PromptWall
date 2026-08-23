@@ -76,3 +76,4 @@ export class ProviderRegistry {
 }
 
 export const providerRegistry = ProviderRegistry.getInstance();
+export { ResilientProvider, resilientProvider } from "./resilient-provider";

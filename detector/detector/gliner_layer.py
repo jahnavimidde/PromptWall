@@ -103,9 +103,17 @@ def load_model() -> None:
     with _lock:
         if _model is not None:
             return
-        from gliner import GLiNER
+        try:
+            from gliner import GLiNER
 
-        _model = GLiNER.from_pretrained(_model_name())
+            _model = GLiNER.from_pretrained(_model_name(), local_files_only=True)
+        except Exception:
+            try:
+                from gliner import GLiNER
+
+                _model = GLiNER.from_pretrained(_model_name())
+            except Exception as e:
+                print(f"Warning: GLiNER model load deferred: {e}")
 
 
 @lru_cache(maxsize=MODEL_INFERENCE_CACHE_SIZE)

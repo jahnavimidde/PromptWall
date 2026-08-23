@@ -53,7 +53,10 @@ describe("shouldLogMaskedContent", () => {
   test("does not log when secrets were detected but not masked (route_local)", () => {
     expect(
       shouldLogMaskedContent({
-        maskedContent: "My key is " + ["sk", "live", "actual-secret"].join("-") + " and email [[EMAIL_ADDRESS_1]]",
+        maskedContent:
+          "My key is " +
+          ["sk", "live", "actual-secret"].join("-") +
+          " and email [[EMAIL_ADDRESS_1]]",
         logMaskedContent: true,
         secretsDetected: true,
         secretsMasked: false,

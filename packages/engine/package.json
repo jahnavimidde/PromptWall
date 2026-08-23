@@ -1,0 +1,20 @@
+{
+  "name": "@promptwall/engine",
+  "version": "0.1.0",
+  "description": "PromptWall v2.0 — Core Detection Framework. Plugin-based, strongly-typed engine for enterprise AI security.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "keywords": ["promptwall", "detection", "pii", "secrets", "security", "plugin"],
+  "license": "Apache-2.0"
+}

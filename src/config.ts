@@ -215,6 +215,36 @@ const SecretsDetectionSchema = z.object({
   scan_roles: scanRolesField,
 });
 
+/**
+ * Request security hardening (M9A).
+ *
+ * max_body_size          — Maximum incoming request body in bytes (default 1 MiB).
+ *                          Override: PROMPTWALL_MAX_BODY_SIZE env variable.
+ * rate_limit_window_ms   — Sliding-window duration for rate limiting in milliseconds.
+ * rate_limit_max_requests — Maximum requests per IP per window.
+ */
+const SecuritySchema = z.object({
+  max_body_size: z.coerce.number().int().min(1).default(1_048_576),
+  rate_limit_window_ms: z.coerce.number().int().min(1000).default(60_000),
+  rate_limit_max_requests: z.coerce.number().int().min(1).default(100),
+});
+
+/**
+ * Enterprise Observability & Monitoring configuration (M10).
+ */
+const ObservabilitySchema = z.object({
+  metrics_enabled: z.boolean().default(true),
+  request_logging: z.boolean().default(true),
+  prometheus_auth_token: z.string().default(""),
+});
+
+/**
+ * Health & Readiness probe configuration (M10).
+ */
+const HealthSchema = z.object({
+  readiness_timeout_ms: z.coerce.number().int().min(100).default(3000),
+});
+
 const ConfigSchema = z
   .object({
     mode: z.enum(["route", "mask"]).default("route"),
@@ -225,6 +255,11 @@ const ConfigSchema = z
       openai: OpenAIProviderSchema.default({}),
       anthropic: AnthropicProviderSchema.default({}),
       codex: CodexProviderSchema.default({}),
+      timeout_ms: z.coerce.number().int().min(100).default(30000),
+      max_retries: z.coerce.number().int().min(0).default(3),
+      retry_delay_ms: z.coerce.number().int().min(0).default(500),
+      circuit_failure_threshold: z.coerce.number().int().min(1).default(5),
+      circuit_reset_timeout_ms: z.coerce.number().int().min(100).default(30000),
     }),
     // Local provider - only for route mode
     local: LocalProviderSchema.optional(),
@@ -233,6 +268,9 @@ const ConfigSchema = z
     logging: LoggingSchema.default({}),
     dashboard: DashboardSchema.default({}),
     secrets_detection: SecretsDetectionSchema.default({}),
+    security: SecuritySchema.default({}),
+    observability: ObservabilitySchema.default({}),
+    health: HealthSchema.default({}),
   })
   .refine(
     (config) => {
@@ -271,6 +309,9 @@ export type AllowlistPattern = z.infer<typeof AllowlistPatternSchema>;
 export type DenylistPattern = z.infer<typeof DenylistPatternSchema>;
 export type SecretsDetectionConfig = z.infer<typeof SecretsDetectionSchema>;
 export type ServerConfig = z.infer<typeof ServerSchema>;
+export type SecurityConfig = z.infer<typeof SecuritySchema>;
+export type ObservabilityConfig = z.infer<typeof ObservabilitySchema>;
+export type HealthConfig = z.infer<typeof HealthSchema>;
 
 /**
  * Replaces ${VAR} and ${VAR:-default} patterns with environment variable values

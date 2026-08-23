@@ -4,12 +4,14 @@ import { Hono } from "hono";
 import { proxy } from "hono/proxy";
 import { getConfig, type MaskingConfig } from "../config";
 import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
+import { logSecurityEvent } from "../logging/audit-logger";
 import { formatMaskedRequestForLog } from "../logging/log-content";
 import { logRequest } from "../logging/logger";
 import type { PlaceholderContext } from "../masking/context";
 import { openaiExtractor } from "../masking/extractors/openai";
 import { restoreResponse } from "../masking/restorer";
 import type { PIIDetectResult } from "../pii/request";
+import { getPolicyEngine } from "../policy/runtime";
 import {
   PrivacyPipelineDetectionError,
   type PrivacyPipelineResult,
@@ -19,6 +21,18 @@ import { callLocal } from "../providers/local";
 // Ensure all providers self-register with the registry on startup
 import "../providers/gemini/provider";
 import "../providers/openai/provider";
+import {
+  CreditCardDetector,
+  DetectionPipeline,
+  type DetectionRequest,
+  DetectorRegistry,
+  EntropySecretDetector,
+  PiiGlinerDetector,
+  type PipelineResult,
+  PromptInjectionDetector,
+  SecretRegexDetector,
+  SemanticInjectionDetector,
+} from "@promptwall/engine";
 import type { ProviderResult } from "../providers/openai/client";
 import { createUnmaskingStream } from "../providers/openai/stream-transformer";
 import {
@@ -27,13 +41,14 @@ import {
   OpenAIRequestSchema,
   type OpenAIResponse,
 } from "../providers/openai/types";
-import { providerRegistry } from "../providers/registry";
+import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
 import {
   createLogData,
   errorFormats,
   handleProviderError,
+  type ProviderId,
   setBlockedHeaders,
   setResponseHeaders,
   setStreamingHeaders,
@@ -42,6 +57,23 @@ import {
   toSecretsHeaderData,
   toSecretsLogData,
 } from "./utils";
+
+// ── DetectionPipeline — configured at module scope ────────────────────────────
+// Build a registry that wires PiiGlinerDetector and SemanticInjectionDetector
+// to the configured detector URL (config.pii_detection.detector_url).
+const _startupConfig = getConfig();
+const _engineRegistry = new DetectorRegistry();
+_engineRegistry.register(new PromptInjectionDetector());
+_engineRegistry.register(
+  new SemanticInjectionDetector({ serviceUrl: _startupConfig.pii_detection.detector_url }),
+);
+_engineRegistry.register(new SecretRegexDetector());
+_engineRegistry.register(new EntropySecretDetector());
+_engineRegistry.register(new CreditCardDetector());
+_engineRegistry.register(
+  new PiiGlinerDetector({ serviceUrl: _startupConfig.pii_detection.detector_url }),
+);
+const _detectionPipeline = new DetectionPipeline({ registry: _engineRegistry });
 
 export const openaiRoutes = new Hono();
 
@@ -70,15 +102,93 @@ openaiRoutes.post(
     // ── Dynamic provider selection ────────────────────────────────────────────
     // Read `provider` from the request body; fall back to DEFAULT_PROVIDER ("gemini").
     // This field is stripped before the request is forwarded upstream.
-    const selectedProvider: string = request.provider ?? DEFAULT_PROVIDER;
+    const selectedProvider = (request.provider ?? DEFAULT_PROVIDER) as ProviderId;
+
+    // ── DetectionPipeline Integration (Milestone 4A) ──────────────────────────
+    let pipelineResult: PipelineResult | undefined;
+    try {
+      const extractedContent = openaiExtractor
+        .extractTexts(request)
+        .map((t) => t.text)
+        .join("\n");
+
+      const detectionReq: DetectionRequest = {
+        content: extractedContent,
+        mimeType: "text/plain",
+        metadata: {
+          model: request.model ?? "unknown",
+          provider: selectedProvider,
+          requestId,
+        },
+      };
+
+      const detectionStartTime = Date.now();
+      const dynamicPolicyEngine = await getPolicyEngine();
+      const dynamicPipeline = new DetectionPipeline({
+        registry: _engineRegistry,
+        policyEngine: dynamicPolicyEngine,
+      });
+      pipelineResult = await dynamicPipeline.run(detectionReq);
+      const detectionLatencyMs = Date.now() - detectionStartTime;
+
+      // Set security policy response headers
+      c.header("X-PasteGuard-Policy-Action", pipelineResult.policyDecision.action);
+      c.header("X-PasteGuard-Risk-Level", pipelineResult.riskAssessment.level);
+      c.header("X-PasteGuard-Risk-Score", pipelineResult.riskAssessment.score.toFixed(1));
+
+      // M6A Security Audit Log (fire-and-forget, ordered before BLOCK 400 and before provider call)
+      logSecurityEvent(pipelineResult, {
+        requestId,
+        provider: selectedProvider,
+        model: request.model ?? "unknown",
+        latencyMs: detectionLatencyMs,
+      });
+
+      // Enforce BLOCK action immediately (prevents any call to LLM providers)
+      if (pipelineResult.policyDecision.action === "block") {
+        logRequest(
+          createLogData({
+            provider: selectedProvider,
+            model: request.model || "unknown",
+            startTime,
+            statusCode: 400,
+            errorMessage: pipelineResult.policyDecision.reason,
+          }),
+          c.req.header("User-Agent") || null,
+        );
+
+        return c.json(
+          errorFormats.openai.error(
+            `Request blocked by security policy: ${pipelineResult.policyDecision.reason}`,
+            "invalid_request_error",
+            "policy_blocked",
+          ),
+          400,
+        );
+      }
+    } catch (error) {
+      console.error("[Engine Error] DetectionPipeline execution failed:", error);
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ── Make engine PolicyDecision authoritative for masking (M4B) ───────────
+    // When the engine decides 'mask', force the privacy pipeline to apply PII
+    // masking regardless of config.mode. This ensures the engine's policy is
+    // the single source of truth rather than an advisory signal.
+    const engineAction = pipelineResult?.policyDecision.action;
+    const effectiveConfig =
+      engineAction === "mask" && config.mode !== "mask"
+        ? { ...config, mode: "mask" as const }
+        : config;
+    // ─────────────────────────────────────────────────────────────────────────
 
     let privacy: PrivacyPipelineResult<OpenAIRequest>;
     let afterSecretsTime = 0;
     let afterPIITime = 0;
     try {
-      // Run the existing privacy pipeline. We capture timestamps around it
-      // only when demo mode is active to avoid unnecessary Date.now() calls.
-      privacy = await processPrivacyPipeline(request, config, openaiExtractor);
+      // Run the existing privacy pipeline with the effective config so that a
+      // 'mask' engine decision forces PII masking even in route mode.
+      privacy = await processPrivacyPipeline(request, effectiveConfig, openaiExtractor);
       if (isDemoMode) {
         // processPrivacyPipeline runs secrets then PII internally; we approximate
         // the split using the reported scanTimeMs from piiResult.
@@ -87,8 +197,35 @@ openaiRoutes.post(
       }
     } catch (error) {
       if (error instanceof PrivacyPipelineDetectionError) {
-        console.error("PII detection error:", error.cause ?? error);
-        return respondDetectionError(c, error.request as OpenAIRequest, startTime, selectedProvider);
+        // Graceful degradation: the PII masking detector is unavailable, but the
+        // security decision (BLOCK) was already enforced above by the engine before
+        // reaching this point. The privacy pipeline PII detection is for masking
+        // only. Degrade to no-PII-masking mode (forward request after secrets
+        // processing) rather than returning 503 and blocking the user entirely.
+        // This matches the behaviour of pii_detection.enabled: false.
+        console.error(
+          "[PII] Detection service unavailable — continuing without PII masking:",
+          error.cause ?? error,
+        );
+        const fallbackSecretsResult = error.secretsResult as SecretsProcessResult<OpenAIRequest>;
+        if (fallbackSecretsResult.blocked) {
+          return respondBlocked(c, request, fallbackSecretsResult, startTime, selectedProvider);
+        }
+        const fallbackRequest = (error.request as OpenAIRequest) ?? request;
+        const fallbackPiiResult: PIIDetectResult = {
+          detection: { hasPII: false, spanEntities: [], allEntities: [], scanTimeMs: 0 },
+          hasPII: false,
+        };
+        return sendToProvider(c, request, {
+          provider: selectedProvider,
+          request: fallbackRequest,
+          piiResult: fallbackPiiResult,
+          secretsResult: fallbackSecretsResult,
+          startTime,
+          authHeader: c.req.header("Authorization"),
+          isDemoMode,
+          requestId,
+        });
       }
       throw error;
     }
@@ -103,7 +240,7 @@ openaiRoutes.post(
       throw new Error("PII detection result missing from privacy pipeline");
     }
 
-    if (config.mode === "mask") {
+    if (effectiveConfig.mode === "mask") {
       return sendToProvider(c, request, {
         provider: selectedProvider,
         request: privacy.request,
@@ -232,7 +369,7 @@ function normalizeOpenAIPath(path: string): string | undefined {
 
 interface ProviderOptions {
   /** The provider id to route to (e.g. "gemini", "openai"). */
-  provider: string;
+  provider: ProviderId;
   request: OpenAIRequest;
   piiResult: PIIDetectResult;
   piiMaskingContext?: PlaceholderContext;
@@ -282,7 +419,7 @@ function respondBlocked(
   body: OpenAIRequest,
   secretsResult: SecretsProcessResult<OpenAIRequest>,
   startTime: number,
-  provider: string,
+  provider: ProviderId,
 ) {
   const secretTypes = secretsResult.blockedTypes ?? [];
 
@@ -310,7 +447,12 @@ function respondBlocked(
   );
 }
 
-function respondDetectionError(c: Context, body: OpenAIRequest, startTime: number, provider: string) {
+function _respondDetectionError(
+  c: Context,
+  body: OpenAIRequest,
+  startTime: number,
+  provider: ProviderId,
+) {
   logRequest(
     createLogData({
       provider,
@@ -383,7 +525,10 @@ async function sendToProvider(c: Context, originalRequest: OpenAIRequest, opts: 
     // Strip our internal routing field before forwarding the request upstream
     const upstreamRequest = stripInternalFields(request);
 
-    const result = (await provider.complete(upstreamRequest, { authHeader })) as ProviderResult;
+    const result = (await resilientProvider.complete(upstreamRequest, {
+      authHeader,
+      provider: providerId,
+    })) as ProviderResult;
     const afterProviderTime = isDemoMode ? Date.now() : 0;
 
     logRequest(
