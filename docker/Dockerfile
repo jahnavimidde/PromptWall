@@ -38,17 +38,12 @@ COPY detector/pyproject.toml /srv/detector/
 COPY detector/detector /srv/detector/detector
 RUN pip install --no-cache-dir /srv/detector
 
-# Bake offline model into image
+# Model is loaded at container startup via the FastAPI lifespan hook (load_model / load_semantic_model).
+# This avoids downloading HuggingFace models at image build time, which fails in
+# offline CI environments (HF_HUB_OFFLINE=1). Set DETECTOR_MODEL_PATH at runtime
+# to point to a pre-cached local path, or allow the first startup to pull from HF Hub.
 ENV DETECTOR_MODEL=urchade/gliner_multi_pii-v1 \
-    HF_HOME=/opt/models \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
-
-RUN ok=""; for i in 1 2 3; do \
-        python -c "import os; from gliner import GLiNER; GLiNER.from_pretrained(os.environ['DETECTOR_MODEL'])" && { ok=1; break; }; \
-        echo "model fetch attempt $i failed; retrying in 10s"; sleep 10; \
-    done; \
-    [ -n "$ok" ] && chown -R 1000:1000 /opt/models || exit 1
+    HF_HOME=/opt/models
 
 EXPOSE 5002
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
