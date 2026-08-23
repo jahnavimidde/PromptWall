@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { getConfig } from "../config";
-import { filterAllowlistedEntities, type PIIDetectionResult, PIIDetector } from "../pii/detect";
 import { DEMO_HEADER, DEMO_SECRET_HEADER } from "../debug/types";
+import { type PIIDetectionResult } from "../pii/detect";
 
 const mockAnalyzeRequest = mock<() => Promise<PIIDetectionResult>>(() =>
   Promise.resolve({
@@ -14,15 +14,18 @@ const mockAnalyzeRequest = mock<() => Promise<PIIDetectionResult>>(() =>
 );
 const mockLogRequest = mock(() => {});
 
-mock.module("../pii/detect", () => ({
-  PIIDetector,
-  filterAllowlistedEntities,
-  getPIIDetector: () => ({
-    analyzeRequest: mockAnalyzeRequest,
-    detectPII: mock(() => Promise.resolve([])),
-    healthCheck: mock(() => Promise.resolve(true)),
-  }),
-}));
+// Only mock getPIIDetector; preserve real exports for filterAllowlistedEntities and PIIDetector
+mock.module("../pii/detect", () => {
+  const actual = require("../pii/detect");
+  return {
+    ...actual, // Re-export all real exports (filterAllowlistedEntities, PIIDetector, etc.)
+    getPIIDetector: () => ({
+      analyzeRequest: mockAnalyzeRequest,
+      detectPII: mock(() => Promise.resolve([])),
+      healthCheck: mock(() => Promise.resolve(true)),
+    }),
+  };
+});
 
 mock.module("../logging/logger", () => ({
   logRequest: mockLogRequest,
@@ -68,7 +71,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 
@@ -98,7 +107,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 
@@ -207,7 +222,13 @@ describe("Demo mode integration tests", () => {
         object: "chat.completion",
         created: 1677652288,
         model: "gpt-4o",
-        choices: [{ index: 0, message: { role: "assistant", content: "Normal OpenAI reply" }, finish_reason: "stop" }],
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Normal OpenAI reply" },
+            finish_reason: "stop",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
 
