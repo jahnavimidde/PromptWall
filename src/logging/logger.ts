@@ -9,7 +9,7 @@ import {
 } from "./db";
 import { shouldLogMaskedContent } from "./log-content";
 
-export type RequestProvider = "openai" | "anthropic" | "codex" | "local" | "api";
+export type RequestProvider = "openai" | "anthropic" | "codex" | "gemini" | "local" | "api";
 export type RequestSource = RequestProvider | "browser_extension";
 
 export interface RequestLog {
