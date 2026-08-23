@@ -161,10 +161,9 @@ describe("ApiKeyStore", () => {
     expect(keys.length).toBe(1);
 
     const key = keys[0];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((key as any).keyHash).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((key as any).key_hash).toBeUndefined();
+
+    expect("keyHash" in key).toBe(false);
+    expect("key_hash" in key).toBe(false);
     expect(key.keyPrefix).toMatch(/^pw_live_/);
   });
 
