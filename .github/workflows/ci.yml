@@ -30,6 +30,18 @@ jobs:
       - name: Lint & format check
         run: bun run check
 
+      - name: Start detector service
+        run: |
+          docker compose --profile dev up -d --build detector
+          for i in {1..30}; do
+            if curl -s http://localhost:5002/health | grep -q "ok"; then
+              echo "Detector service is ready"
+              break
+            fi
+            echo "Waiting for detector service... ($i/30)"
+            sleep 2
+          done
+
       - name: Run tests
         run: bun test
 
