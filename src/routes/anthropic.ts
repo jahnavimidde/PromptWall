@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { extractGatewayCredential } from "../auth/middleware";
 import { getConfig } from "../config";
 import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
 import { formatMaskedRequestForLog } from "../logging/log-content";
@@ -23,6 +24,7 @@ import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { LLMRequest, LLMResponse } from "../providers/types";
 import type { SecretsProcessResult } from "../secrets/request";
 import {
+  buildSanitizedUrl,
   createLogData,
   errorFormats,
   handleProviderError,
@@ -163,14 +165,33 @@ anthropicRoutes.all("/*", async (c) => {
   const { proxy } = await import("hono/proxy");
   const baseUrl = config.providers.anthropic.base_url || "https://api.anthropic.com";
   const path = c.req.path.replace(/^\/anthropic/, "");
-  const query = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
+  // Strip gateway credential params (?api_key, ?token) before building the upstream URL.
+  // Header-based credentials are stripped below; the query string is sanitized here so
+  // PromptWall credentials never appear in upstream access logs or CDN records.
+  const rawQuery = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
 
-  return proxy(`${baseUrl}${path}${query}`, {
+  const forwardHeaders: Record<string, string | undefined> = {
+    ...c.req.header(),
+    "X-Forwarded-Host": c.req.header("host"),
+    host: undefined,
+  };
+  const cred = extractGatewayCredential(c.req);
+  if (cred) {
+    if (cred.type === "api_key" && cred.token.startsWith("pw_live_")) {
+      delete forwardHeaders["x-api-key"];
+      delete forwardHeaders["api-key"];
+      if (forwardHeaders.authorization?.toLowerCase().startsWith("bearer pw_live_")) {
+        delete forwardHeaders.authorization;
+      }
+    } else if (cred.type === "jwt" && c.get("user")) {
+      delete forwardHeaders.authorization;
+    }
+  }
+
+  return proxy(buildSanitizedUrl(`${baseUrl}${path}`, rawQuery), {
     ...c.req,
     headers: {
-      ...c.req.header(),
-      "X-Forwarded-Host": c.req.header("host"),
-      host: undefined,
+      ...forwardHeaders,
     },
   });
 });
@@ -350,9 +371,23 @@ async function sendToAnthropic(c: Context, request: AnthropicRequest, opts: Send
     toSecretsHeaderData(secretsResult),
   );
 
+  const cred = extractGatewayCredential(c.req);
+  const rawApiKey = c.req.header("x-api-key");
+  const rawAuth = c.req.header("Authorization");
+
   const clientHeaders = {
-    apiKey: c.req.header("x-api-key"),
-    authorization: c.req.header("Authorization"),
+    apiKey:
+      rawApiKey &&
+      (rawApiKey.startsWith("pw_live_") || (c.get("apiKey") && cred?.token === rawApiKey))
+        ? undefined
+        : rawApiKey,
+    authorization:
+      rawAuth &&
+      (rawAuth.startsWith("Bearer pw_live_") ||
+        rawAuth.startsWith("bearer pw_live_") ||
+        (c.get("user") && cred?.type === "jwt" && rawAuth.slice(7).trim() === cred.token))
+        ? undefined
+        : rawAuth,
     beta: c.req.header("anthropic-beta"),
   };
 

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import pkg from "../package.json";
+import { aiGatewayAuthMiddleware } from "./auth/middleware";
 import { getConfig } from "./config";
 import { getAuditLogger } from "./logging/audit-logger";
 import { getLogger } from "./logging/logger";
@@ -34,9 +35,9 @@ type Variables = {
 };
 
 const config = getConfig();
-const app = new Hono<{ Variables: Variables }>();
+export const app = new Hono<{ Variables: Variables }>();
 
-// ── Security Hardening Middleware (M9A) ───────────────────────────────────────
+// ── Security Hardening Middleware (M9A / M14) ─────────────────────────────────
 const secConfig = config.security;
 
 // 1. Security response headers — applied globally to every response
@@ -63,12 +64,29 @@ const limiter = rateLimiter({
 app.use("/openai/*", limiter);
 app.use("/anthropic/*", limiter);
 app.use("/codex/*", limiter);
+
+// 5. AI Gateway Authentication (M14) — protects all AI provider routes
+const gatewayAuth = aiGatewayAuthMiddleware();
+app.use("/openai", gatewayAuth);
+app.use("/openai/*", gatewayAuth);
+app.use("/anthropic", gatewayAuth);
+app.use("/anthropic/*", gatewayAuth);
+app.use("/codex", gatewayAuth);
+app.use("/codex/*", gatewayAuth);
 // ─────────────────────────────────────────────────────────────────────────────
+
+function safeConsoleLog(str: string, ...rest: string[]) {
+  const sanitized = str.replace(
+    /([?&](?:api_key|token|key|secret|password)=)[^&\s]+/gi,
+    "$1[REDACTED]",
+  );
+  console.log(sanitized, ...rest);
+}
 
 // Middleware
 app.use("*", requestIdMiddleware());
 app.use("*", cors());
-app.use("*", logger());
+app.use("*", logger(safeConsoleLog));
 
 // Favicon
 app.get("/favicon.svg", (c) => {
@@ -139,12 +157,14 @@ export default {
   fetch: app.fetch,
 };
 
-// Startup validation
-validateStartup().then(async () => {
-  printStartupBanner(config, host, port);
-  const stopCleanup = await startCleanupScheduler(config);
-  setupGracefulShutdown(stopCleanup);
-});
+// Startup validation (only when executed directly as entrypoint)
+if (import.meta.main) {
+  validateStartup().then(async () => {
+    printStartupBanner(config, host, port);
+    const stopCleanup = await startCleanupScheduler(config);
+    setupGracefulShutdown(stopCleanup);
+  });
+}
 
 async function validateStartup() {
   // Validate secrets detection configuration

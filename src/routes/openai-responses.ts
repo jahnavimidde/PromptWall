@@ -22,6 +22,7 @@ import { createResponsesUnmaskingStream } from "../protocols/responses/stream-tr
 import { ProviderError } from "../providers/errors";
 import type { SecretsProcessResult } from "../secrets/request";
 import {
+  buildSanitizedUrl,
   createLogData,
   errorFormats,
   handleProviderError,
@@ -188,11 +189,12 @@ async function sendToOpenAI(
   );
 
   try {
+    const rawQuery = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
     const response = await callOpenAIResponses(
       request,
       config.providers.openai,
       c.req.header(),
-      new URL(c.req.url).search,
+      rawQuery,
       c.req.raw.signal,
     );
     const contentType = response.headers.get("content-type") || "";
@@ -247,7 +249,8 @@ async function callOpenAIResponses(
     timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
   ].filter((signal): signal is AbortSignal => Boolean(signal));
   const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
-  const response = await fetch(`${provider.base_url.replace(/\/$/, "")}/responses${query}`, {
+  const baseUrl = `${provider.base_url.replace(/\/$/, "")}/responses`;
+  const response = await fetch(buildSanitizedUrl(baseUrl, query), {
     method: "POST",
     headers: buildUpstreamHeaders(clientHeaders, provider),
     body: JSON.stringify(request),

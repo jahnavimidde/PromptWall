@@ -39,6 +39,10 @@ export async function callCodex(
     }
   }
 
+  if (config.api_key && !headers.Authorization && !headers.authorization) {
+    headers.Authorization = `Bearer ${config.api_key}`;
+  }
+
   const response = await fetch(endpoint, {
     method: "POST",
     headers,

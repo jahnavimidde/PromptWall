@@ -219,3 +219,10 @@ export function requireOrgPermission(permission: OrgPermission): MiddlewareHandl
     await next();
   };
 }
+
+export {
+  aiGatewayAuthMiddleware,
+  type ExtractedCredential,
+  extractGatewayCredential,
+  type GatewayAuthOptions,
+} from "./gateway-middleware";

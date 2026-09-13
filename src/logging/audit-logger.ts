@@ -87,6 +87,8 @@ export class SqliteAuditLogger implements AuditLogger {
       ),
     );
 
+    const orgId = (event as { organizationId?: string | null }).organizationId ?? null;
+
     await this.db
       .insertInto("security_events")
       .values({
@@ -104,6 +106,7 @@ export class SqliteAuditLogger implements AuditLogger {
         detectors_triggered: JSON.stringify(event.detectorsTriggered),
         matched_rule_ids: JSON.stringify(event.matchedRuleIds),
         latency_ms: event.latencyMs,
+        organization_id: orgId,
       })
       .execute();
   }
@@ -137,6 +140,7 @@ export class SqliteAuditLogger implements AuditLogger {
         "detectors_triggered",
         "matched_rule_ids",
         "latency_ms",
+        "organization_id",
       ])
       .orderBy("timestamp", "desc")
       .limit(limit)
@@ -159,6 +163,7 @@ export class SqliteAuditLogger implements AuditLogger {
       detectorsTriggered: JSON.parse(row.detectors_triggered) as string[],
       matchedRuleIds: JSON.parse(row.matched_rule_ids) as string[],
       latencyMs: Number(row.latency_ms),
+      organizationId: row.organization_id,
     }));
   }
 
@@ -201,6 +206,7 @@ export class SqliteAuditLogger implements AuditLogger {
 /** A `SecurityEvent` as retrieved from the database (includes the auto-increment `id`). */
 export interface StoredSecurityEvent extends SecurityEvent {
   readonly id: number;
+  readonly organizationId?: string | null;
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
@@ -235,6 +241,8 @@ export interface LogSecurityEventOptions {
   readonly model: string;
   /** Milliseconds elapsed between extraction start and `DetectionPipeline.run()` resolving. */
   readonly latencyMs: number;
+  /** Tenant organization ID if request is authenticated. */
+  readonly organizationId?: string | null;
   /**
    * Optional override logger — pass a fresh `SqliteAuditLogger` in tests to
    * avoid interacting with the global singleton.
@@ -271,6 +279,10 @@ export function logSecurityEvent(
       model: opts.model,
       latencyMs: opts.latencyMs,
     });
+
+    if (opts.organizationId) {
+      (event as unknown as { organizationId?: string | null }).organizationId = opts.organizationId;
+    }
 
     const logger = opts.logger ?? getAuditLogger();
 

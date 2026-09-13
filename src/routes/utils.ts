@@ -262,3 +262,69 @@ export function handleProviderError(
 
   return c.json(formatError(errorMessage), 502);
 }
+
+// ============================================================================
+// Query Credential Stripping
+// ============================================================================
+
+/**
+ * Gateway credential query-parameter names.
+ *
+ * These parameters are accepted by {@link extractGatewayCredential} for
+ * authentication and MUST be removed from the upstream URL before proxying.
+ * Forwarding them would expose PromptWall credentials in upstream server logs,
+ * CDN access logs, HTTP Referer headers, and browser history.
+ *
+ * Only authentication-specific names are listed here. Provider-specific
+ * parameters (e.g. `provider`, `stream`, `limit`) are never touched.
+ */
+const CREDENTIAL_QUERY_PARAMS = new Set(["api_key", "token"]);
+
+/**
+ * Strip gateway credential parameters from a raw query string.
+ *
+ * Uses `URLSearchParams` for safe, RFC-3986-compliant parsing so that:
+ * - URL-encoded characters in values are decoded and re-encoded correctly.
+ * - Repeated parameter names are each removed independently.
+ * - Unrelated parameters (e.g. `provider=openai&limit=10`) are preserved in order.
+ * - No naive string replacement is used.
+ *
+ * @param rawQuery - The raw query portion of the URL, with or without a leading `?`.
+ * @returns A sanitized query string WITHOUT a leading `?`.
+ *          Returns an empty string when no non-credential parameters remain.
+ *
+ * @example
+ * stripCredentialParams("?api_key=pw_live_xxx&provider=openai&token=jwt")
+ * // => "provider=openai"
+ *
+ * stripCredentialParams("?provider=openai&limit=10")
+ * // => "provider=openai&limit=10"
+ *
+ * stripCredentialParams("")
+ * // => ""
+ */
+export function stripCredentialParams(rawQuery: string): string {
+  if (!rawQuery) return "";
+  const qs = rawQuery.startsWith("?") ? rawQuery.slice(1) : rawQuery;
+  if (!qs) return "";
+  const params = new URLSearchParams(qs);
+  for (const key of CREDENTIAL_QUERY_PARAMS) {
+    params.delete(key);
+  }
+  return params.toString();
+}
+
+/**
+ * Build a sanitized upstream URL by appending a credential-free query string.
+ *
+ * Adds the leading `?` only when non-credential parameters remain after stripping.
+ * Credential parameters are stripped via {@link stripCredentialParams}.
+ *
+ * @param base     - The base URL (path, no query string).
+ * @param rawQuery - The raw query string from the incoming request (with or without `?`).
+ * @returns The base URL with a clean, credential-free query string appended.
+ */
+export function buildSanitizedUrl(base: string, rawQuery: string): string {
+  const clean = stripCredentialParams(rawQuery);
+  return clean ? `${base}?${clean}` : base;
+}

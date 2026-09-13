@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { proxy } from "hono/proxy";
+import { extractGatewayCredential } from "../auth/middleware";
 import { getConfig, type MaskingConfig } from "../config";
 import { buildDebugEnvelope, isDemoEnabled } from "../debug/debugEnvelope";
 import { logSecurityEvent } from "../logging/audit-logger";
@@ -45,6 +46,7 @@ import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { SecretsProcessResult } from "../secrets/request";
 import { openaiResponsesRoutes } from "./openai-responses";
 import {
+  buildSanitizedUrl,
   createLogData,
   errorFormats,
   handleProviderError,
@@ -142,6 +144,7 @@ openaiRoutes.post(
         provider: selectedProvider,
         model: request.model ?? "unknown",
         latencyMs: detectionLatencyMs,
+        organizationId: c.get("orgId") ?? null,
       });
 
       // Enforce BLOCK action immediately (prevents any call to LLM providers)
@@ -248,7 +251,7 @@ openaiRoutes.post(
         piiMaskingContext: privacy.piiMaskingContext,
         secretsResult,
         startTime,
-        authHeader: c.req.header("Authorization"),
+        authHeader: getUpstreamAuthHeader(c),
         isDemoMode,
         requestId,
         afterSecretsTime,
@@ -278,7 +281,7 @@ openaiRoutes.post(
       piiResult,
       secretsResult,
       startTime,
-      authHeader: c.req.header("Authorization"),
+      authHeader: getUpstreamAuthHeader(c),
       isDemoMode,
       requestId,
       afterSecretsTime,
@@ -315,14 +318,33 @@ openaiRoutes.all("/*", (c) => {
       : config.providers.gemini.base_url;
   const baseUrl = (catchAllProvider?.info().baseUrl as string) ?? fallbackUrl;
   const path = c.req.path.replace(/^\/openai\/v1/, "");
-  const query = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
+  // Strip gateway credential params (?api_key, ?token) before building the upstream URL.
+  // Header-based credentials are stripped below; the query string is sanitized here so
+  // PromptWall credentials never appear in upstream access logs or CDN records.
+  const rawQuery = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
 
-  return proxy(`${baseUrl}${path}${query}`, {
+  const forwardHeaders: Record<string, string | undefined> = {
+    ...c.req.header(),
+    "X-Forwarded-Host": c.req.header("host"),
+    host: undefined,
+  };
+  const cred = extractGatewayCredential(c.req);
+  if (cred) {
+    if (cred.type === "api_key" && cred.token.startsWith("pw_live_")) {
+      delete forwardHeaders["x-api-key"];
+      delete forwardHeaders["api-key"];
+      if (forwardHeaders.authorization?.toLowerCase().startsWith("bearer pw_live_")) {
+        delete forwardHeaders.authorization;
+      }
+    } else if (cred.type === "jwt" && c.get("user")) {
+      delete forwardHeaders.authorization;
+    }
+  }
+
+  return proxy(buildSanitizedUrl(`${baseUrl}${path}`, rawQuery), {
     ...c.req,
     headers: {
-      ...c.req.header(),
-      "X-Forwarded-Host": c.req.header("host"),
-      host: undefined,
+      ...forwardHeaders,
     },
   });
 });
@@ -472,6 +494,19 @@ function _respondDetectionError(
     ),
     503,
   );
+}
+
+function getUpstreamAuthHeader(c: Context): string | undefined {
+  const auth = c.req.header("Authorization") || c.req.header("authorization");
+  if (!auth) return undefined;
+  const trimmed = auth.trim();
+  if (trimmed.toLowerCase().startsWith("bearer ")) {
+    const val = trimmed.slice(7).trim();
+    if (val.startsWith("pw_live_")) return undefined;
+    const cred = extractGatewayCredential(c.req);
+    if (c.get("user") && cred && cred.type === "jwt" && cred.token === val) return undefined;
+  }
+  return auth;
 }
 
 // --- Provider handlers ---

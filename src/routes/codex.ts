@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { proxy } from "hono/proxy";
 import { z } from "zod";
+import { extractGatewayCredential } from "../auth/middleware";
 import { getConfig } from "../config";
 import { formatMaskedRequestForLog } from "../logging/log-content";
 import { logRequest } from "../logging/logger";
@@ -25,6 +26,7 @@ import { providerRegistry, resilientProvider } from "../providers/registry";
 import type { LLMRequest, LLMResponse } from "../providers/types";
 import type { SecretsProcessResult } from "../secrets/request";
 import {
+  buildSanitizedUrl,
   createLogData,
   errorFormats,
   handleProviderError,
@@ -110,12 +112,16 @@ codexRoutes.all("/*", (c) => {
   const config = getConfig();
   const normalizedBaseUrl = config.providers.codex.base_url.replace(/\/$/, "");
   const path = c.req.path.replace(/^\/codex/, "");
-  const query = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
+  // Strip gateway credential params (?api_key, ?token) before building the upstream URL.
+  // Header-based credentials are already stripped by getForwardHeaders(); the query
+  // string is sanitized here so PromptWall credentials never appear in upstream logs.
+  const rawQuery = c.req.url.includes("?") ? c.req.url.slice(c.req.url.indexOf("?")) : "";
 
-  return proxy(`${normalizedBaseUrl}${path}${query}`, {
+  const forwardHeaders = getForwardHeaders(c);
+  return proxy(buildSanitizedUrl(`${normalizedBaseUrl}${path}`, rawQuery), {
     ...c.req,
     headers: {
-      ...c.req.header(),
+      ...forwardHeaders,
       "X-Forwarded-Host": c.req.header("host"),
       host: undefined,
     },
@@ -133,9 +139,21 @@ interface CodexOptions {
 
 function getForwardHeaders(c: Context): Record<string, string> {
   const headers: Record<string, string> = {};
+  const cred = extractGatewayCredential(c.req);
+
   for (const [key, value] of Object.entries(c.req.header())) {
     const lower = key.toLowerCase();
     if (lower === "host" || lower === "content-length" || lower === "content-type") continue;
+
+    // Never forward PromptWall credentials upstream to Codex
+    if (lower === "x-api-key" || lower === "api-key") {
+      if (value.startsWith("pw_live_") || (c.get("apiKey") && cred?.token === value)) continue;
+    }
+    if (lower === "authorization") {
+      if (value.startsWith("Bearer pw_live_") || value.startsWith("bearer pw_live_")) continue;
+      if (c.get("user") && cred?.type === "jwt" && value.slice(7).trim() === cred.token) continue;
+    }
+
     headers[key] = value;
   }
   headers["X-Forwarded-Host"] = c.req.header("host") || "";
