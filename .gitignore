@@ -8,6 +8,12 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+.env.development
+.env.test
+.env.bak
+*.bak
 
 # Config (user-specific)
 config.yaml
@@ -22,6 +28,14 @@ data/
 # Logs
 logs/
 *.log
+
+# Secrets & Certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
 
 # IDE
 .idea/
@@ -39,3 +53,14 @@ coverage/
 test-*.ts
 test-*.sh
 test-*.js
+
+# Python cache & venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+detector/.venv/
+detector/.pytest_cache/
+detector/.ruff_cache/
+
